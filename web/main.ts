@@ -64,13 +64,14 @@ function renderSimulation() {
   const junkPoints = ledger.filter((entry) => entry.type === "junk" || entry.type === "hole_in_one").reduce((sum, entry) => sum + entry.points, 0);
   const cpPoints = ledger.filter((entry) => entry.type === "closest_par3").reduce((sum, entry) => sum + entry.points, 0);
   const pressPoints = ledger.filter((entry) => entry.type === "press_win").reduce((sum, entry) => sum + entry.points, 0);
+  const strokesByPlayer = new Map(round.roundPlayers.map((item) => [item.playerId, item.strokesReceived]));
   summaryEl.innerHTML = `
     <div><strong>Course:</strong> ${escapeHtml(course.name)} (${escapeHtml(teeBox?.name ?? teeBoxId)})</div>
     <div><strong>Par Total:</strong> ${course.parTotal}</div>
     <div><strong>Hole Wins:</strong> Team A ${teamAHoleWins}, Team B ${teamBHoleWins}, Halved ${halvedHoles}</div>
     <div><strong>Sim Events:</strong> Junk ${round.junkEvents.length}, CP ${round.closestEvents.length}, Par5 Carryover ${round.par5CarryoverEvents.length}, Auto Presses ${round.presses?.length ?? 0}</div>
     <div><strong>Ledger Points:</strong> Junk ${junkPoints}, CP ${cpPoints}, Press ${pressPoints}</div>
-    <div><strong>Players:</strong> ${round.players.map((player) => `${player.name} (${player.handicap})`).join(", ")}</div>
+    <div><strong>Players:</strong> ${round.players.map((player) => `${player.name} (${strokesByPlayer.get(player.id) ?? 0} strokes)`).join(", ")}</div>
   `;
 
   const pressIds = [...(round.presses ?? [])]

@@ -24,7 +24,12 @@ const teamScores = round.teams.map((team) => {
 
 console.log(`Round ${round.id}`);
 console.log(`Course: ${round.course?.name ?? round.courseId} (${round.teeBoxId ?? "n/a"})`);
-console.log(`Players: ${round.players.map((player) => `${player.name} (${player.handicap})`).join(", ")}`);
+const strokesByPlayer = new Map(round.roundPlayers.map((item) => [item.playerId, item.strokesReceived]));
+console.log(
+  `Players: ${round.players
+    .map((player) => `${player.name} (${strokesByPlayer.get(player.id) ?? 0} strokes)`)
+    .join(", ")}`
+);
 console.log("");
 console.log("Hole wins:");
 for (const row of teamScores) {

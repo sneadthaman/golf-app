@@ -3,7 +3,8 @@ export type SideType = "front" | "back" | "overall";
 export interface Player {
   id: string;
   name: string;
-  handicap: number;
+  lastUsedStrokesReceived?: number;
+  defaultStrokesReceived?: number;
 }
 
 export interface Team {
@@ -33,6 +34,7 @@ export interface Course {
   holes: CourseHole[];
   teeBoxes: TeeBox[];
   parTotal: number;
+  handicapMode?: "standard18" | "split9_replay";
 }
 
 export interface RoundSettings {
@@ -51,6 +53,7 @@ export interface Round {
   course?: Course;
   teeBoxId?: string;
   players: Player[];
+  roundPlayers: RoundPlayer[];
   teams: Team[];
   courseHoles: CourseHole[];
   settings: RoundSettings;
@@ -61,6 +64,13 @@ export interface Round {
   closestEvents: ClosestEvent[];
   par5CarryoverEvents: Par5CarryoverEvent[];
   presses?: Press[];
+}
+
+export interface RoundPlayer {
+  roundId: string;
+  playerId: string;
+  teamId: string;
+  strokesReceived: number;
 }
 
 export interface HoleScore {

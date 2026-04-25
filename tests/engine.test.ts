@@ -19,10 +19,16 @@ const teamA: Team = { id: "teamA", name: "Team A", playerIds: ["p1", "p2"] };
 const teamB: Team = { id: "teamB", name: "Team B", playerIds: ["p3", "p4"] };
 
 const players = [
-  { id: "p1", name: "P1", handicap: 10 },
-  { id: "p2", name: "P2", handicap: 14 },
-  { id: "p3", name: "P3", handicap: 8 },
-  { id: "p4", name: "P4", handicap: 12 }
+  { id: "p1", name: "P1", defaultStrokesReceived: 10, lastUsedStrokesReceived: 10 },
+  { id: "p2", name: "P2", defaultStrokesReceived: 14, lastUsedStrokesReceived: 14 },
+  { id: "p3", name: "P3", defaultStrokesReceived: 8, lastUsedStrokesReceived: 8 },
+  { id: "p4", name: "P4", defaultStrokesReceived: 12, lastUsedStrokesReceived: 12 }
+];
+const roundPlayers = [
+  { roundId: "r1", playerId: "p1", teamId: "teamA", strokesReceived: 10 },
+  { roundId: "r1", playerId: "p2", teamId: "teamA", strokesReceived: 14 },
+  { roundId: "r1", playerId: "p3", teamId: "teamB", strokesReceived: 8 },
+  { roundId: "r1", playerId: "p4", teamId: "teamB", strokesReceived: 12 }
 ];
 
 function buildCourseHoles() {
@@ -72,6 +78,7 @@ function baseRound(overrides?: Partial<Round>): Round {
     id: "r1",
     courseId: "course1",
     players,
+    roundPlayers,
     teams: [teamA, teamB],
     courseHoles: buildCourseHoles(),
     settings: {
@@ -99,8 +106,8 @@ describe("engine primitives", () => {
     const holes = buildCourseHoles();
     const scores = calculateNetScores(
       [
-        { id: "p1", name: "A", handicap: 20 },
-        { id: "p2", name: "B", handicap: 5 }
+        { roundId: "r1", playerId: "p1", teamId: "teamA", strokesReceived: 20 },
+        { roundId: "r1", playerId: "p2", teamId: "teamB", strokesReceived: 5 }
       ],
       holes,
       [
@@ -115,6 +122,29 @@ describe("engine primitives", () => {
     expect(p1?.netScore).toBe(3);
     expect(p2?.strokesReceived).toBe(1);
     expect(p2?.netScore).toBe(4);
+  });
+
+  test("calculateNetScores splits strokes across nines for replayed 9-hole ranking", () => {
+    const replayHoles = Array.from({ length: 18 }).map((_, idx) => ({
+      holeNumber: idx + 1,
+      par: 4,
+      handicapIndex: (idx % 9) + 1
+    }));
+    const scores = calculateNetScores(
+      [{ roundId: "r1", playerId: "p1", teamId: "teamA", strokesReceived: 5 }],
+      replayHoles,
+      Array.from({ length: 18 }).map((_, idx) => ({
+        holeNumber: idx + 1,
+        playerId: "p1",
+        grossScore: 4
+      })),
+      "r1",
+      { handicapMode: "split9_replay" }
+    );
+    const frontStrokes = scores.filter((score) => score.holeNumber <= 9).reduce((sum, score) => sum + score.strokesReceived, 0);
+    const backStrokes = scores.filter((score) => score.holeNumber >= 10).reduce((sum, score) => sum + score.strokesReceived, 0);
+    expect(frontStrokes).toBe(3);
+    expect(backStrokes).toBe(2);
   });
 
   test("getHoleWinner supports best-ball comparison", () => {
@@ -388,7 +418,7 @@ describe("course fixtures and simulation", () => {
     const simulationB = simulateSameHandicapRound({ seed: 1234, handicap: 10, teeBoxId: "white", roundId: "sim-a" });
 
     expect(simulationA.round.players).toHaveLength(4);
-    expect(new Set(simulationA.round.players.map((player) => player.handicap))).toEqual(new Set([10]));
+    expect(new Set(simulationA.round.roundPlayers.map((item) => item.strokesReceived))).toEqual(new Set([10]));
     expect(simulationA.round.holeScores).toHaveLength(72);
     expect(simulationA.round.holeResults).toHaveLength(18);
     expect(simulationA.holeBreakdown).toHaveLength(18);

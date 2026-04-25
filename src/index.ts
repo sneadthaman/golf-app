@@ -9,3 +9,4 @@ export * from "./engine/ledger";
 export * from "./engine/settlement";
 export * from "./simulation/courseFixtures";
 export * from "./simulation/simulateRound";
+export * from "./courseData";

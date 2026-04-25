@@ -4,7 +4,7 @@ import { getHoleWinner } from "../engine/match";
 import { calculateNetScores, GrossScoreInput } from "../engine/net";
 import { evaluateAutoPresses } from "../engine/presses";
 import { calculateSettlement, SettlementResult } from "../engine/settlement";
-import { ClosestEvent, Course, JunkEvent, LedgerEntry, Par5CarryoverEvent, Player, Round, SideStatus, Team } from "../types";
+import { ClosestEvent, Course, JunkEvent, LedgerEntry, Par5CarryoverEvent, Player, Round, RoundPlayer, SideStatus, Team } from "../types";
 import { createSimplePar72Course } from "./courseFixtures";
 
 function createRng(seed: number): () => number {
@@ -187,15 +187,21 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
   const rng = createRng(options.seed ?? 42);
 
   const players: Player[] = [
-    { id: "p1", name: "Player 1", handicap },
-    { id: "p2", name: "Player 2", handicap },
-    { id: "p3", name: "Player 3", handicap },
-    { id: "p4", name: "Player 4", handicap }
+    { id: "p1", name: "Player 1", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap },
+    { id: "p2", name: "Player 2", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap },
+    { id: "p3", name: "Player 3", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap },
+    { id: "p4", name: "Player 4", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap }
   ];
 
   const teams: Team[] = [
     { id: "teamA", name: "Team A", playerIds: ["p1", "p2"] },
     { id: "teamB", name: "Team B", playerIds: ["p3", "p4"] }
+  ];
+  const roundPlayers: RoundPlayer[] = [
+    { roundId, playerId: "p1", teamId: "teamA", strokesReceived: handicap },
+    { roundId, playerId: "p2", teamId: "teamA", strokesReceived: handicap },
+    { roundId, playerId: "p3", teamId: "teamB", strokesReceived: handicap },
+    { roundId, playerId: "p4", teamId: "teamB", strokesReceived: handicap }
   ];
 
   const grossInputs: GrossScoreInput[] = [];
@@ -209,7 +215,9 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
     }
   }
 
-  const holeScores = calculateNetScores(players, course.holes, grossInputs, roundId);
+  const holeScores = calculateNetScores(roundPlayers, course.holes, grossInputs, roundId, {
+    handicapMode: course.handicapMode
+  });
   const holeResults: Round["holeResults"] = [];
   const holeBreakdown: SimulatedRoundResult["holeBreakdown"] = [];
   let presses: Round["presses"] = [];
@@ -226,6 +234,7 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
       course,
       teeBoxId,
       players,
+      roundPlayers,
       teams,
       courseHoles: course.holes,
       settings: {
@@ -285,6 +294,7 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
     course,
     teeBoxId,
     players,
+    roundPlayers,
     teams,
     courseHoles: course.holes,
     settings: {
