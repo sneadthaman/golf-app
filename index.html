@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Golf Betting Simulator</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1>Golf Betting Simulator</h1>
+        <p>Deterministic Nassau simulation with course metadata and tee box support.</p>
+      </header>
+
+      <section class="controls">
+        <label>
+          Seed
+          <input id="seed" type="number" value="42" />
+        </label>
+        <label>
+          Handicap (all 4 golfers)
+          <input id="handicap" type="number" value="12" min="0" max="54" />
+        </label>
+        <label>
+          Tee Box
+          <select id="teeBox"></select>
+        </label>
+        <button id="simulateBtn" type="button">Run Simulation</button>
+      </section>
+
+      <section class="summary" id="summary"></section>
+
+      <section class="panel">
+        <h2>Hole-by-Hole Outcomes</h2>
+        <table>
+          <thead>
+            <tr id="holeHeaderRow">
+              <th>Hole</th>
+              <th>Par</th>
+              <th>A Net</th>
+              <th>B Net</th>
+              <th>Winner</th>
+              <th>Front</th>
+              <th>Back</th>
+              <th>Overall</th>
+            </tr>
+          </thead>
+          <tbody id="holeRows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Ledger</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Hole</th>
+              <th>Type</th>
+              <th>Team</th>
+              <th>Points</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody id="ledgerRows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Course Holes</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Hole</th>
+              <th>Par</th>
+              <th>Hdcp</th>
+              <th>Yardage</th>
+            </tr>
+          </thead>
+          <tbody id="courseRows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Settlement</h2>
+        <div id="settlement"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/web/main.ts"></script>
+  </body>
+</html>

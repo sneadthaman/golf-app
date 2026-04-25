@@ -1,0 +1,118 @@
+:root {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: #182325;
+  background: #f3f6f4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.app-header h1 {
+  margin: 0;
+}
+
+.app-header p {
+  margin: 8px 0 0;
+  color: #41575b;
+}
+
+.controls {
+  margin: 20px 0;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid #d6e0dc;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.controls input,
+.controls select {
+  min-width: 150px;
+  padding: 8px;
+  border: 1px solid #b8c9c2;
+  border-radius: 6px;
+}
+
+.controls button {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #1f7a43;
+  color: white;
+  cursor: pointer;
+}
+
+.summary {
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #d6e0dc;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.panel {
+  margin-bottom: 16px;
+  background: #ffffff;
+  border: 1px solid #d6e0dc;
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e6eeeb;
+  padding: 8px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.settlement-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 720px) {
+  .settlement-grid {
+    grid-template-columns: 1fr;
+  }
+}
