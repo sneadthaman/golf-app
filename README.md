@@ -1,99 +1,111 @@
-# Golf Betting Engine (MVP)
+# Golf Betting Engine
 
-Pure TypeScript betting engine for Nassau + junk + carryovers + presses, with a deterministic simulation harness.
+TypeScript betting engine + web harness for Nassau-style team games.
+
+Current scope is a practical dev harness for validating game logic and persistence before mobile app work.
+
+## What Works Now
+
+- Course search/load from GolfCourseAPI (with recent courses)
+- Round setup in UI:
+  - course + tee selection
+  - 4 players
+  - 2v2 teams
+  - manual strokes received
+  - configurable front/back/overall/press values
+  - double-game toggle
+- Live score entry:
+  - hole-by-hole gross scores
+  - automatic net score calculation
+  - running front/back/overall match status
+  - auto-press generation and status
+- Side games:
+  - manual junk entry
+  - closest-to-pin on par 3 and par 5
+  - independent par 3/par 5 carryover banks
+- Settlement display:
+  - running ledger
+  - by-team and by-player totals
+- Persistence to Supabase from UI:
+  - JSON snapshot (`round_snapshots`)
+  - normalized tables (rounds, players, teams, scores, events, ledger)
+
+## Stack
+
+- TypeScript
+- Vite
+- Vitest
+- Playwright
+- Supabase
 
 ## Commands
 
+- `npm run web` start local UI (default Vite port)
+- `npm run web -- --host 127.0.0.1 --port 5174` start UI on fixed local port
 - `npm test` run unit tests
-- `npm run build` type-check all TypeScript
+- `npm run build` type-check project
+- `npm run test:e2e` run Playwright tests
 - `npm run simulate -- --seed 42 --handicap 12 --tee white` run CLI simulation
-- `npm run fetch-course -- --search "Old Westbury Golf & Country Club"` fetch and normalize a live GolfCourseAPI course
-- `npm run seed-old-westbury` upsert Old Westbury facility/course/tee/hole data into Supabase
-- `npm run web` launch local UI at `http://localhost:5173`
-  - includes hole-by-hole match state, ledger, junk/CP summaries, and auto-press visibility
+- `npm run fetch-course -- --search "Old Westbury Golf & Country Club"` fetch/normalize live course
+- `npm run seed-old-westbury` seed reference course data into Supabase
 
-## Course Fixture
+## Environment Variables
 
-- `createSimplePar72Course()` returns an 18-hole par-72 course
-- Holes include:
-  - `holeNumber`
-  - `par`
-  - `handicapIndex` (1-18)
-  - `yardageByTeeBox`
-- Tee boxes include:
-  - `id`
-  - `name`
-  - `color`
-  - `courseRating`
-  - `slope`
+### Course API
 
-## Simulation
+- `VITE_GOLFCOURSEAPI_KEY` (preferred for browser)
+- `GOLFCOURSEAPI_KEY` (also supported)
+- optional base URL overrides:
+  - `VITE_GOLFCOURSEAPI_BASE_URL`
+  - `GOLFCOURSEAPI_BASE_URL`
 
-- `simulateSameHandicapRound()` creates a deterministic 4-player (2v2) round
-- Uses the same betting engine code path as app logic
-- Supports `seed`, `handicap`, and `teeBoxId` options for repeatable runs
-- Includes simulated:
-  - hole-by-hole winner + running front/back/overall status
-  - junk events
-  - closest-to-pin (par 3 carryover) events
-  - par-5 carryover events
-  - auto-press generation
+### Supabase (web save)
 
-## Handicap MVP Rule
+- `VITE_SUPABASE_URL` (or `SUPABASE_URL`)
+- `VITE_SUPABASE_SERVICE_ROLE_KEY` (or `VITE_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`)
 
-- No GHIN/USGA lookup in app.
-- Store manual `strokesReceived` per player at round level (`RoundPlayer`).
-- Net score uses per-round strokes and hole handicap index:
-  - Example: 4 strokes -> 1 stroke on holes indexed 1-4.
-  - Example: 20 strokes -> 1 stroke on all 18 + extra on indexes 1-2.
+## Supabase Setup
 
-## Course Data Provider Layer
-
-- `CourseProvider` abstraction in `src/courseData`
-  - `searchCourses(query)`
-  - `getCourse(courseId)`
-- Included implementations:
-  - `MockCourseProvider` for local/dev data
-  - `ApiCourseProvider` scaffold for future API integration
-  - `GolfCourseApiProvider` for `https://api.golfcourseapi.com` (`Authorization: Key <API_KEY>`)
-  - `CachedCourseProvider` with `InMemoryCourseCache`
-- `normalizeExternalCourse()` validates and maps external payloads into the internal `Course` model.
-- Set `GOLFCOURSEAPI_KEY` before live fetches:
-  - `export GOLFCOURSEAPI_KEY=your_key_here`
-
-## Supabase setup
-
-1. Run `supabase/schema.sql` in your Supabase SQL editor.
-2. Set env vars:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `GOLFCOURSEAPI_KEY`
-3. Seed Old Westbury data:
+1. Open `supabase/schema.sql` in Supabase SQL editor and run it.
+2. If your project already has older schema versions, run the full file again.
+   - It includes `alter table ... add column if not exists` for compatibility.
+3. Optional: seed known course data.
    - `npm run seed-old-westbury`
 
-The seed script upserts these Old Westbury Golf & Country Club course IDs:
-- `6760`
-- `6770`
-- `6847`
-- `7316` (Bluegrass/Overlook)
-- `7339` (Woods/Bluegrass)
-- `7626` (Overlook/Woods)
+### Tables Written by “Save Round to Supabase”
 
-## Next Up (Prioritized)
+- Snapshot:
+  - `round_snapshots`
+- Normalized:
+  - `rounds`
+  - `players`
+  - `round_teams`
+  - `round_players`
+  - `hole_scores`
+  - `round_junk_events`
+  - `round_closest_events`
+  - `round_presses`
+  - `ledger_entries`
 
-- [ ] Move incremental loading from client-side slicing to provider-backed paging (true API pagination)
-- [ ] Add structured API error UI states (auth, rate-limit, timeout, no-results) with targeted recovery actions
-- [ ] Add E2E CI job (Playwright) gated on PRs with artifact upload on failure
-- [ ] Add “Clear search/results” and keyboard-first interactions for faster dev-harness use
-- [ ] Define mobile app integration contract (shared search/load state model + API surface)
+## Project Layout
 
-## Live Course UI Setup
+- `src/engine/*` core betting/settlement logic
+- `src/simulation/*` deterministic simulation helpers
+- `src/courseData/*` provider/caching/normalization layer
+- `web/main.ts` browser harness UI logic
+- `web/persistence.ts` Supabase save logic
+- `supabase/schema.sql` database schema
+- `tests/*` unit tests
+- `e2e/*` Playwright flows
 
-- For local UI live course search/load, set either:
-  - `VITE_GOLFCOURSEAPI_KEY` (standard Vite style), or
-  - `GOLFCOURSEAPI_KEY` (now supported directly)
-- Optional base URL override:
-  - `VITE_GOLFCOURSEAPI_BASE_URL` or `GOLFCOURSEAPI_BASE_URL`
-  - defaults to `https://api.golfcourseapi.com`
-- Start the app:
-  - `npm run web -- --host 127.0.0.1 --port 5174`
+## Current Product Position
+
+This browser UI is intentionally a developer harness to validate scoring rules and persistence.
+It is not yet the final user-facing mobile UX.
+
+## Next Work (High Level)
+
+- Load/resume saved rounds in UI
+- Saved rounds list/view
+- Continue tightening API error states and edge handling
+- Keep engine + persistence contract ready for mobile client integration

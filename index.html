@@ -16,7 +16,7 @@
       <section class="controls">
         <label class="control-wide">
           Course Search
-          <input id="courseQuery" type="text" placeholder="e.g. Old Westbury" />
+          <input id="courseQuery" type="text" value="bethpage black" placeholder="e.g. Old Westbury" />
         </label>
         <button id="searchCourseBtn" type="button">Search Courses</button>
         <label class="control-wide">
@@ -48,9 +48,210 @@
           <select id="teeBox"></select>
         </label>
         <button id="simulateBtn" type="button">Run Simulation</button>
+        <button id="saveRoundBtn" type="button">Save Round to Supabase</button>
+        <div class="control-status" id="saveStatus"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Round Setup</h2>
+        <div class="setup-grid">
+          <div class="setup-column">
+            <h3>Players</h3>
+            <div class="setup-player-row">
+              <label>
+                Player 1 Name
+                <input id="player1Name" type="text" value="SJ" />
+              </label>
+              <label>
+                Team
+                <select id="player1Team">
+                  <option value="teamA" selected>Team A</option>
+                  <option value="teamB">Team B</option>
+                </select>
+              </label>
+              <label>
+                Strokes
+                <input id="player1Strokes" type="number" min="0" max="54" value="5" />
+              </label>
+            </div>
+            <div class="setup-player-row">
+              <label>
+                Player 2 Name
+                <input id="player2Name" type="text" value="CK" />
+              </label>
+              <label>
+                Team
+                <select id="player2Team">
+                  <option value="teamA" selected>Team A</option>
+                  <option value="teamB">Team B</option>
+                </select>
+              </label>
+              <label>
+                Strokes
+                <input id="player2Strokes" type="number" min="0" max="54" value="1" />
+              </label>
+            </div>
+            <div class="setup-player-row">
+              <label>
+                Player 3 Name
+                <input id="player3Name" type="text" value="RR" />
+              </label>
+              <label>
+                Team
+                <select id="player3Team">
+                  <option value="teamA">Team A</option>
+                  <option value="teamB" selected>Team B</option>
+                </select>
+              </label>
+              <label>
+                Strokes
+                <input id="player3Strokes" type="number" min="0" max="54" value="0" />
+              </label>
+            </div>
+            <div class="setup-player-row">
+              <label>
+                Player 4 Name
+                <input id="player4Name" type="text" value="TK" />
+              </label>
+              <label>
+                Team
+                <select id="player4Team">
+                  <option value="teamA">Team A</option>
+                  <option value="teamB" selected>Team B</option>
+                </select>
+              </label>
+              <label>
+                Strokes
+                <input id="player4Strokes" type="number" min="0" max="54" value="4" />
+              </label>
+            </div>
+          </div>
+
+          <div class="setup-column">
+            <h3>Points & Options</h3>
+            <div class="setup-points-row">
+              <label>
+                Front Points
+                <input id="frontPoints" type="number" min="1" value="2" />
+              </label>
+              <label>
+                Back Points
+                <input id="backPoints" type="number" min="1" value="3" />
+              </label>
+              <label>
+                Overall Points
+                <input id="overallPoints" type="number" min="1" value="4" />
+              </label>
+              <label>
+                Press Points
+                <input id="pressPoints" type="number" min="1" value="1" />
+              </label>
+            </div>
+            <label class="setup-checkbox">
+              <input id="doubleGame" type="checkbox" />
+              Double Game (2x point values)
+            </label>
+            <button id="applySetupBtn" type="button">Apply Round Setup</button>
+            <div class="control-status" id="setupStatus"></div>
+          </div>
+        </div>
       </section>
 
       <section class="summary" id="summary"></section>
+
+      <section class="panel">
+        <h2>Hole-by-Hole Gross Score Entry</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Hole</th>
+              <th>Par</th>
+              <th id="scoreHeaderP1">Player 1</th>
+              <th id="scoreHeaderP2">Player 2</th>
+              <th id="scoreHeaderP3">Player 3</th>
+              <th id="scoreHeaderP4">Player 4</th>
+            </tr>
+          </thead>
+          <tbody id="scoreEntryRows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Junk Entry</h2>
+        <div class="junk-controls">
+          <label>
+            Hole
+            <select id="junkHole"></select>
+          </label>
+          <label>
+            Player
+            <select id="junkPlayer"></select>
+          </label>
+          <label>
+            Junk Type
+            <select id="junkType">
+              <option value="net_birdie">net_birdie</option>
+              <option value="up_and_down_net_par">up_and_down_net_par</option>
+              <option value="sandy_net_par">sandy_net_par</option>
+              <option value="chip_in_net_par">chip_in_net_par</option>
+              <option value="net_eagle">net_eagle</option>
+              <option value="hole_in_one">hole_in_one</option>
+            </select>
+          </label>
+          <button id="addJunkBtn" type="button">Add Junk</button>
+          <div class="control-status" id="junkStatus"></div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Hole</th>
+              <th>Player</th>
+              <th>Team</th>
+              <th>Type</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="junkRows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Closest-to-Pin Carryovers</h2>
+        <div class="junk-controls">
+          <label>
+            Track
+            <select id="closestTrack">
+              <option value="par3">Par 3</option>
+              <option value="par5">Par 5</option>
+            </select>
+          </label>
+          <label>
+            Hole
+            <select id="closestHole"></select>
+          </label>
+          <label>
+            Result
+            <select id="closestWinner">
+              <option value="teamA">Team A Wins</option>
+              <option value="teamB">Team B Wins</option>
+              <option value="carry">No Winner (Carry)</option>
+            </select>
+          </label>
+          <button id="addClosestBtn" type="button">Add CP Event</button>
+          <div class="control-status" id="closestStatus"></div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Track</th>
+              <th>Hole</th>
+              <th>Result</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="closestRows"></tbody>
+        </table>
+      </section>
 
       <section class="panel">
         <h2>Hole-by-Hole Outcomes</h2>

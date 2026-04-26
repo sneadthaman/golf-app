@@ -23,12 +23,7 @@ function scoreDeltaFromRoll(roll: number): number {
   return 2;
 }
 
-function teamIdForPlayer(playerId: string): "teamA" | "teamB" {
-  return playerId === "p1" || playerId === "p2" ? "teamA" : "teamB";
-}
-
-function simulationBias(holeNumber: number, playerId: string): number {
-  const teamId = teamIdForPlayer(playerId);
+function simulationBias(holeNumber: number, teamId: string): number {
   if (holeNumber >= 1 && holeNumber <= 4) {
     return teamId === "teamA" ? -1 : 1;
   }
@@ -38,10 +33,10 @@ function simulationBias(holeNumber: number, playerId: string): number {
   return 0;
 }
 
-function simulateGrossScore(par: number, handicapIndex: number, holeNumber: number, playerId: string, rng: () => number): number {
+function simulateGrossScore(par: number, handicapIndex: number, holeNumber: number, teamId: string, rng: () => number): number {
   const delta = scoreDeltaFromRoll(rng());
   const difficultyAdjustment = handicapIndex <= 6 ? 1 : 0;
-  const gross = par + delta + difficultyAdjustment + simulationBias(holeNumber, playerId);
+  const gross = par + delta + difficultyAdjustment + simulationBias(holeNumber, teamId);
   return Math.max(1, gross);
 }
 
@@ -60,15 +55,14 @@ function statusForSide(holeResults: Round["holeResults"], side: SideSelector): S
   return calculateSideStatus(holeResults, side, "teamA", "teamB");
 }
 
-function buildJunkEvents(roundId: string, round: Pick<Round, "courseHoles" | "holeScores">, rng: () => number): JunkEvent[] {
+function buildJunkEvents(
+  roundId: string,
+  round: Pick<Round, "courseHoles" | "holeScores">,
+  teamIdByPlayerId: Record<string, string>,
+  rng: () => number
+): JunkEvent[] {
   const holeByNumber = new Map(round.courseHoles.map((hole) => [hole.holeNumber, hole]));
   const events: JunkEvent[] = [];
-  const teamIdByPlayerId: Record<string, string> = {
-    p1: "teamA",
-    p2: "teamA",
-    p3: "teamB",
-    p4: "teamB"
-  };
 
   for (const score of round.holeScores) {
     const hole = holeByNumber.get(score.holeNumber);
@@ -103,14 +97,13 @@ function buildJunkEvents(roundId: string, round: Pick<Round, "courseHoles" | "ho
   return events;
 }
 
-function buildClosestEvents(roundId: string, round: Pick<Round, "courseHoles">, rng: () => number): ClosestEvent[] {
-  const teamIdByPlayerId: Record<string, string> = {
-    p1: "teamA",
-    p2: "teamA",
-    p3: "teamB",
-    p4: "teamB"
-  };
-  const players = ["p1", "p2", "p3", "p4"];
+function buildClosestEvents(
+  roundId: string,
+  round: Pick<Round, "courseHoles">,
+  teamIdByPlayerId: Record<string, string>,
+  rng: () => number
+): ClosestEvent[] {
+  const players = Object.keys(teamIdByPlayerId);
   const events: ClosestEvent[] = [];
 
   for (const hole of round.courseHoles) {
@@ -158,6 +151,14 @@ export interface SameHandicapSimulationOptions {
   teeBoxId?: string;
   roundId?: string;
   course?: Course;
+  playerConfigs?: Array<{
+    id: string;
+    name: string;
+    strokesReceived: number;
+    teamId: "teamA" | "teamB";
+  }>;
+  settings?: Partial<Round["settings"]>;
+  doubleGame?: boolean;
 }
 
 export interface SimulatedRoundResult {
@@ -185,32 +186,61 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
   const roundId = options.roundId ?? "sim-round-1";
   const handicap = options.handicap ?? 12;
   const rng = createRng(options.seed ?? 42);
+  const playerConfigs =
+    options.playerConfigs ??
+    [
+      { id: "p1", name: "Player 1", strokesReceived: handicap, teamId: "teamA" as const },
+      { id: "p2", name: "Player 2", strokesReceived: handicap, teamId: "teamA" as const },
+      { id: "p3", name: "Player 3", strokesReceived: handicap, teamId: "teamB" as const },
+      { id: "p4", name: "Player 4", strokesReceived: handicap, teamId: "teamB" as const }
+    ];
 
-  const players: Player[] = [
-    { id: "p1", name: "Player 1", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap },
-    { id: "p2", name: "Player 2", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap },
-    { id: "p3", name: "Player 3", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap },
-    { id: "p4", name: "Player 4", defaultStrokesReceived: handicap, lastUsedStrokesReceived: handicap }
-  ];
-
+  const players: Player[] = playerConfigs.map((item) => ({
+    id: item.id,
+    name: item.name,
+    defaultStrokesReceived: item.strokesReceived,
+    lastUsedStrokesReceived: item.strokesReceived
+  }));
   const teams: Team[] = [
-    { id: "teamA", name: "Team A", playerIds: ["p1", "p2"] },
-    { id: "teamB", name: "Team B", playerIds: ["p3", "p4"] }
+    {
+      id: "teamA",
+      name: "Team A",
+      playerIds: playerConfigs.filter((item) => item.teamId === "teamA").map((item) => item.id)
+    },
+    {
+      id: "teamB",
+      name: "Team B",
+      playerIds: playerConfigs.filter((item) => item.teamId === "teamB").map((item) => item.id)
+    }
   ];
-  const roundPlayers: RoundPlayer[] = [
-    { roundId, playerId: "p1", teamId: "teamA", strokesReceived: handicap },
-    { roundId, playerId: "p2", teamId: "teamA", strokesReceived: handicap },
-    { roundId, playerId: "p3", teamId: "teamB", strokesReceived: handicap },
-    { roundId, playerId: "p4", teamId: "teamB", strokesReceived: handicap }
-  ];
+  const roundPlayers: RoundPlayer[] = playerConfigs.map((item) => ({
+    roundId,
+    playerId: item.id,
+    teamId: item.teamId,
+    strokesReceived: item.strokesReceived
+  }));
+  const teamIdByPlayerId = playerConfigs.reduce<Record<string, string>>((acc, item) => {
+    acc[item.id] = item.teamId;
+    return acc;
+  }, {});
+  const pointMultiplier = options.doubleGame ? 2 : 1;
+  const settings: Round["settings"] = {
+    crazyMode: options.settings?.crazyMode ?? false,
+    frontValuePoints: (options.settings?.frontValuePoints ?? 2) * pointMultiplier,
+    backValuePoints: (options.settings?.backValuePoints ?? 3) * pointMultiplier,
+    overallValuePoints: (options.settings?.overallValuePoints ?? 4) * pointMultiplier,
+    pressValuePoints: (options.settings?.pressValuePoints ?? 1) * pointMultiplier,
+    autoPressEnabled: options.settings?.autoPressEnabled ?? true,
+    junkEnabled: options.settings?.junkEnabled ?? true
+  };
 
   const grossInputs: GrossScoreInput[] = [];
   for (const hole of course.holes) {
-    for (const player of players) {
+    for (const player of playerConfigs) {
       grossInputs.push({
         holeNumber: hole.holeNumber,
         playerId: player.id,
-        grossScore: simulateGrossScore(hole.par, hole.handicapIndex, hole.holeNumber, player.id, rng)
+        grossScore: simulateGrossScore(hole.par, hole.handicapIndex, hole.holeNumber, player.teamId, rng)
       });
     }
   }
@@ -237,15 +267,7 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
       roundPlayers,
       teams,
       courseHoles: course.holes,
-      settings: {
-        crazyMode: false,
-        frontValuePoints: 2,
-        backValuePoints: 3,
-        overallValuePoints: 4,
-        pressValuePoints: 1,
-        autoPressEnabled: true,
-        junkEnabled: true
-      },
+      settings,
       status: "active",
       holeScores,
       holeResults: [...holeResults],
@@ -284,8 +306,8 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
     });
   }
 
-  const junkEvents = buildJunkEvents(roundId, { courseHoles: course.holes, holeScores }, rng);
-  const closestEvents = buildClosestEvents(roundId, { courseHoles: course.holes }, rng);
+  const junkEvents = buildJunkEvents(roundId, { courseHoles: course.holes, holeScores }, teamIdByPlayerId, rng);
+  const closestEvents = buildClosestEvents(roundId, { courseHoles: course.holes }, teamIdByPlayerId, rng);
   const par5CarryoverEvents = buildPar5CarryoverEvents(roundId, { courseHoles: course.holes, holeResults }, rng);
 
   const round: Round = {
@@ -297,15 +319,7 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
     roundPlayers,
     teams,
     courseHoles: course.holes,
-    settings: {
-      crazyMode: false,
-      frontValuePoints: 2,
-      backValuePoints: 3,
-      overallValuePoints: 4,
-      pressValuePoints: 1,
-      autoPressEnabled: true,
-      junkEnabled: true
-    },
+    settings,
     status: "complete",
     holeScores,
     holeResults,

@@ -106,6 +106,73 @@ body {
   margin-top: 0;
 }
 
+.setup-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 2fr 1fr;
+}
+
+.setup-column h3 {
+  margin: 0 0 10px;
+}
+
+.setup-player-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.setup-points-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.setup-column label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.setup-column input,
+.setup-column select {
+  padding: 8px;
+  border: 1px solid #b8c9c2;
+  border-radius: 6px;
+}
+
+.setup-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+
+.junk-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 10px;
+}
+
+.junk-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.junk-controls select {
+  min-width: 170px;
+  padding: 8px;
+  border: 1px solid #b8c9c2;
+  border-radius: 6px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -117,6 +184,31 @@ td {
   padding: 8px;
   text-align: left;
   font-size: 14px;
+}
+
+#scoreEntryRows input {
+  width: 72px;
+  padding: 6px;
+  border: 1px solid #b8c9c2;
+  border-radius: 6px;
+}
+
+.score-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stroke-marker {
+  min-width: 18px;
+  color: #1f7a43;
+  font-weight: 700;
+  font-size: 13px;
+  text-align: center;
+}
+
+.stroke-marker.empty {
+  color: transparent;
 }
 
 .settlement-grid {
@@ -132,6 +224,15 @@ ul {
 
 @media (max-width: 720px) {
   .settlement-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-player-row,
+  .setup-points-row {
     grid-template-columns: 1fr;
   }
 }

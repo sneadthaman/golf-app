@@ -65,31 +65,50 @@ create table if not exists public.course_holes (
 -- Round and scoring model (manual strokes per round-player)
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
+  external_player_ref text,
   display_name text not null,
   default_strokes_received int,
   last_used_strokes_received int,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table if exists public.players add column if not exists external_player_ref text;
+create unique index if not exists players_external_player_ref_idx
+  on public.players(external_player_ref);
 
 create table if not exists public.rounds (
   id uuid primary key default gen_random_uuid(),
-  course_id uuid not null references public.courses(id),
+  course_id uuid references public.courses(id),
+  external_round_ref text,
+  course_external_ref text,
+  course_name text,
+  tee_box_external_ref text,
   tee_box_id uuid references public.tee_boxes(id),
   status text not null default 'active' check (status in ('active', 'complete')),
   settings jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table if exists public.rounds add column if not exists external_round_ref text;
+alter table if exists public.rounds add column if not exists course_external_ref text;
+alter table if exists public.rounds add column if not exists course_name text;
+alter table if exists public.rounds add column if not exists tee_box_external_ref text;
+alter table if exists public.rounds alter column course_id drop not null;
+create unique index if not exists rounds_external_round_ref_idx
+  on public.rounds(external_round_ref);
 
 create table if not exists public.round_teams (
   id uuid primary key default gen_random_uuid(),
   round_id uuid not null references public.rounds(id) on delete cascade,
+  external_team_ref text,
   name text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(round_id, name)
 );
+alter table if exists public.round_teams add column if not exists external_team_ref text;
+create unique index if not exists round_teams_round_external_team_ref_idx
+  on public.round_teams(round_id, external_team_ref);
 
 create table if not exists public.round_players (
   round_id uuid not null references public.rounds(id) on delete cascade,
@@ -126,3 +145,74 @@ create table if not exists public.ledger_entries (
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+create table if not exists public.round_junk_events (
+  id uuid primary key default gen_random_uuid(),
+  round_id uuid not null references public.rounds(id) on delete cascade,
+  hole_number int not null check (hole_number > 0),
+  player_id uuid not null references public.players(id) on delete cascade,
+  team_id uuid not null references public.round_teams(id) on delete cascade,
+  event_type text not null,
+  points numeric(8,2),
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.round_closest_events (
+  id uuid primary key default gen_random_uuid(),
+  round_id uuid not null references public.rounds(id) on delete cascade,
+  hole_number int not null check (hole_number > 0),
+  track text not null check (track in ('par3', 'par5')),
+  winner_team_id uuid references public.round_teams(id) on delete set null,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(round_id, track, hole_number)
+);
+
+create table if not exists public.round_presses (
+  id uuid primary key default gen_random_uuid(),
+  round_id uuid not null references public.rounds(id) on delete cascade,
+  external_press_ref text not null,
+  side text not null check (side in ('front', 'back')),
+  starting_hole int not null check (starting_hole > 0),
+  ending_hole int not null check (ending_hole > 0),
+  team_that_was_down_id uuid not null references public.round_teams(id) on delete cascade,
+  value_points numeric(8,2) not null,
+  created_by text not null,
+  trigger_hole int not null check (trigger_hole > 0),
+  source_match_id text,
+  status text not null check (status in ('active', 'settled')),
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(round_id, external_press_ref)
+);
+
+-- Round snapshot persistence (web harness / integration layer)
+create table if not exists public.round_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  round_id text not null unique,
+  status text not null default 'active' check (status in ('active', 'complete')),
+  round_metadata jsonb not null default '{}'::jsonb,
+  players jsonb not null default '[]'::jsonb,
+  teams jsonb not null default '[]'::jsonb,
+  hole_scores jsonb not null default '[]'::jsonb,
+  junk_events jsonb not null default '[]'::jsonb,
+  closest_events_par3 jsonb not null default '[]'::jsonb,
+  closest_events_par5 jsonb not null default '[]'::jsonb,
+  presses jsonb not null default '[]'::jsonb,
+  final_ledger jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Backfill-safe alters for existing projects that already ran older schema versions.
+alter table if exists public.players add column if not exists external_player_ref text;
+alter table if exists public.rounds add column if not exists external_round_ref text;
+alter table if exists public.rounds add column if not exists course_external_ref text;
+alter table if exists public.rounds add column if not exists course_name text;
+alter table if exists public.rounds add column if not exists tee_box_external_ref text;
+alter table if exists public.round_teams add column if not exists external_team_ref text;
+alter table if exists public.rounds alter column course_id drop not null;

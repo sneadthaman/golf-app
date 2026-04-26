@@ -18,76 +18,83 @@ export function evaluateMainBets(round: Round): LedgerEntry[] {
   if (!teamA || !teamB) return [];
 
   const entries: LedgerEntry[] = [];
-  const frontStatus = calculateSideStatus(round.holeResults.filter((result) => result.holeNumber <= 9), "front", teamA.id, teamB.id);
-  if (frontStatus.state === "teamAUp") {
-    entries.push({
-      id: makeLedgerId("front_win", 9, teamA.id),
-      roundId: round.id,
-      holeNumber: 9,
-      type: "front_win",
-      teamId: teamA.id,
-      points: values.front,
-      description: "Front 9 won"
-    });
-  }
-  if (frontStatus.state === "teamBUp") {
-    entries.push({
-      id: makeLedgerId("front_win", 9, teamB.id),
-      roundId: round.id,
-      holeNumber: 9,
-      type: "front_win",
-      teamId: teamB.id,
-      points: values.front,
-      description: "Front 9 won"
-    });
+  const hasHole9Result = round.holeResults.some((result) => result.holeNumber === 9);
+  const hasHole18Result = round.holeResults.some((result) => result.holeNumber === 18);
+
+  if (hasHole9Result) {
+    const frontStatus = calculateSideStatus(round.holeResults.filter((result) => result.holeNumber <= 9), "front", teamA.id, teamB.id);
+    if (frontStatus.state === "teamAUp") {
+      entries.push({
+        id: makeLedgerId("front_win", 9, teamA.id),
+        roundId: round.id,
+        holeNumber: 9,
+        type: "front_win",
+        teamId: teamA.id,
+        points: values.front,
+        description: "Front 9 won"
+      });
+    }
+    if (frontStatus.state === "teamBUp") {
+      entries.push({
+        id: makeLedgerId("front_win", 9, teamB.id),
+        roundId: round.id,
+        holeNumber: 9,
+        type: "front_win",
+        teamId: teamB.id,
+        points: values.front,
+        description: "Front 9 won"
+      });
+    }
   }
 
-  const backStatus = calculateSideStatus(round.holeResults.filter((result) => result.holeNumber >= 10), "back", teamA.id, teamB.id);
-  if (backStatus.state === "teamAUp") {
-    entries.push({
-      id: makeLedgerId("back_win", 18, teamA.id),
-      roundId: round.id,
-      holeNumber: 18,
-      type: "back_win",
-      teamId: teamA.id,
-      points: values.back,
-      description: "Back 9 won"
-    });
-  }
-  if (backStatus.state === "teamBUp") {
-    entries.push({
-      id: makeLedgerId("back_win", 18, teamB.id),
-      roundId: round.id,
-      holeNumber: 18,
-      type: "back_win",
-      teamId: teamB.id,
-      points: values.back,
-      description: "Back 9 won"
-    });
-  }
+  if (hasHole18Result) {
+    const backStatus = calculateSideStatus(round.holeResults.filter((result) => result.holeNumber >= 10), "back", teamA.id, teamB.id);
+    if (backStatus.state === "teamAUp") {
+      entries.push({
+        id: makeLedgerId("back_win", 18, teamA.id),
+        roundId: round.id,
+        holeNumber: 18,
+        type: "back_win",
+        teamId: teamA.id,
+        points: values.back,
+        description: "Back 9 won"
+      });
+    }
+    if (backStatus.state === "teamBUp") {
+      entries.push({
+        id: makeLedgerId("back_win", 18, teamB.id),
+        roundId: round.id,
+        holeNumber: 18,
+        type: "back_win",
+        teamId: teamB.id,
+        points: values.back,
+        description: "Back 9 won"
+      });
+    }
 
-  const overallStatus = calculateSideStatus(round.holeResults, "overall", teamA.id, teamB.id);
-  if (overallStatus.state === "teamAUp") {
-    entries.push({
-      id: makeLedgerId("overall_win", 18, teamA.id),
-      roundId: round.id,
-      holeNumber: 18,
-      type: "overall_win",
-      teamId: teamA.id,
-      points: values.overall,
-      description: "Overall 18 won"
-    });
-  }
-  if (overallStatus.state === "teamBUp") {
-    entries.push({
-      id: makeLedgerId("overall_win", 18, teamB.id),
-      roundId: round.id,
-      holeNumber: 18,
-      type: "overall_win",
-      teamId: teamB.id,
-      points: values.overall,
-      description: "Overall 18 won"
-    });
+    const overallStatus = calculateSideStatus(round.holeResults, "overall", teamA.id, teamB.id);
+    if (overallStatus.state === "teamAUp") {
+      entries.push({
+        id: makeLedgerId("overall_win", 18, teamA.id),
+        roundId: round.id,
+        holeNumber: 18,
+        type: "overall_win",
+        teamId: teamA.id,
+        points: values.overall,
+        description: "Overall 18 won"
+      });
+    }
+    if (overallStatus.state === "teamBUp") {
+      entries.push({
+        id: makeLedgerId("overall_win", 18, teamB.id),
+        roundId: round.id,
+        holeNumber: 18,
+        type: "overall_win",
+        teamId: teamB.id,
+        points: values.overall,
+        description: "Overall 18 won"
+      });
+    }
   }
 
   return entries;
