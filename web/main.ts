@@ -14,6 +14,7 @@ const settlementEl = document.querySelector<HTMLElement>("#settlement");
 const courseQueryInput = document.querySelector<HTMLInputElement>("#courseQuery");
 const searchCourseBtn = document.querySelector<HTMLButtonElement>("#searchCourseBtn");
 const courseResultsSelect = document.querySelector<HTMLSelectElement>("#courseResults");
+const loadMoreBtn = document.querySelector<HTMLButtonElement>("#loadMoreBtn");
 const loadCourseBtn = document.querySelector<HTMLButtonElement>("#loadCourseBtn");
 const recentCoursesSelect = document.querySelector<HTMLSelectElement>("#recentCourses");
 const loadRecentBtn = document.querySelector<HTMLButtonElement>("#loadRecentBtn");
@@ -34,6 +35,7 @@ if (
   !courseQueryInput ||
   !searchCourseBtn ||
   !courseResultsSelect ||
+  !loadMoreBtn ||
   !loadCourseBtn ||
   !recentCoursesSelect ||
   !loadRecentBtn ||
@@ -50,11 +52,27 @@ const { provider: courseProvider, source: providerSource } = createCourseProvide
 });
 
 const storage = typeof localStorage === "undefined" ? undefined : localStorage;
-const courseFlow = new CourseFlowController({ provider: courseProvider, storage });
+const SEARCH_MIN_CHARS = 4;
+const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_PAGE_SIZE = 8;
+const SIMULATION_CONTROLS_STORAGE_KEY = "golf-app.simulation-controls.v1";
+const courseFlow = new CourseFlowController({
+  provider: courseProvider,
+  storage,
+  minSearchChars: SEARCH_MIN_CHARS,
+  searchPageSize: SEARCH_PAGE_SIZE
+});
 courseFlow.initialize();
 
 let currentCourse: Course = createSimplePar72Course();
 let controlsBusy = false;
+let searchDebounceHandle: number | undefined;
+
+interface SimulationControlsState {
+  seed: string;
+  handicap: string;
+  teeBoxId?: string;
+}
 
 function setCourseStatus(message: string, isError = false): void {
   courseStatusEl.textContent = message;
@@ -65,11 +83,12 @@ function setControlsBusy(isBusy: boolean): void {
   controlsBusy = isBusy;
   const searchResults = courseFlow.getSearchResults();
   const recentCourses = courseFlow.getRecentCourses();
+  const hasMoreSearchResults = courseFlow.hasMoreSearchResults();
 
   searchCourseBtn.disabled = isBusy;
-  courseQueryInput.disabled = isBusy;
   courseResultsSelect.disabled = isBusy || searchResults.length === 0;
   loadCourseBtn.disabled = isBusy || searchResults.length === 0 || !courseResultsSelect.value;
+  loadMoreBtn.disabled = isBusy || !hasMoreSearchResults;
   recentCoursesSelect.disabled = isBusy || recentCourses.length === 0;
   loadRecentBtn.disabled = isBusy || recentCourses.length === 0 || !recentCoursesSelect.value;
   clearRecentBtn.disabled = isBusy || recentCourses.length === 0;
@@ -82,6 +101,46 @@ function escapeHtml(text: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function readSimulationControls(): SimulationControlsState | undefined {
+  if (!storage) return undefined;
+  try {
+    const raw = storage.getItem(SIMULATION_CONTROLS_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const item = parsed as Record<string, unknown>;
+    const seed = typeof item.seed === "string" ? item.seed : undefined;
+    const handicap = typeof item.handicap === "string" ? item.handicap : undefined;
+    const teeBoxId = typeof item.teeBoxId === "string" ? item.teeBoxId : undefined;
+    if (!seed || !handicap) return undefined;
+    return { seed, handicap, ...(teeBoxId ? { teeBoxId } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
+function persistSimulationControls(): void {
+  if (!storage) return;
+  try {
+    const payload: SimulationControlsState = {
+      seed: seedInput.value || "42",
+      handicap: handicapInput.value || "12",
+      ...(teeBoxSelect.value ? { teeBoxId: teeBoxSelect.value } : {})
+    };
+    storage.setItem(SIMULATION_CONTROLS_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
+function applyInitialSimulationControls(): void {
+  const saved = readSimulationControls();
+  if (!saved) return;
+  seedInput.value = saved.seed;
+  handicapInput.value = saved.handicap;
+  populateTeeBoxes(currentCourse, saved.teeBoxId);
 }
 
 function populateTeeBoxes(course: Course, preferredTeeBoxId?: string): void {
@@ -147,10 +206,21 @@ function populateRecentCourses(): void {
 }
 
 async function runCourseSearch(query: string): Promise<void> {
-  setControlsBusy(true);
-  setCourseStatus("Searching courses...");
+  const trimmed = query.trim();
+  const shouldQueryProvider = trimmed.length >= SEARCH_MIN_CHARS;
+  if (shouldQueryProvider) {
+    setControlsBusy(true);
+    setCourseStatus("Searching courses...");
+  }
 
   const outcome = await courseFlow.searchCourses(query);
+  populateCourseResults();
+  setControlsBusy(false);
+  setCourseStatus(outcome.message, !outcome.ok);
+}
+
+function loadMoreResults(): void {
+  const outcome = courseFlow.loadMoreSearchResults();
   populateCourseResults();
   setControlsBusy(false);
   setCourseStatus(outcome.message, !outcome.ok);
@@ -163,7 +233,8 @@ async function loadSelectedCourse(): Promise<void> {
   const outcome = await courseFlow.loadCourseFromSearch(courseResultsSelect.value);
   if (outcome.ok && outcome.course) {
     currentCourse = outcome.course;
-    populateTeeBoxes(currentCourse);
+    const saved = readSimulationControls();
+    populateTeeBoxes(currentCourse, saved?.teeBoxId);
     renderSimulation();
     populateRecentCourses();
     setControlsBusy(false);
@@ -182,7 +253,8 @@ async function loadRecentCourse(): Promise<void> {
   const outcome = await courseFlow.loadCourseFromRecent(recentCoursesSelect.value);
   if (outcome.ok && outcome.course) {
     currentCourse = outcome.course;
-    populateTeeBoxes(currentCourse);
+    const saved = readSimulationControls();
+    populateTeeBoxes(currentCourse, saved?.teeBoxId);
     renderSimulation();
     populateRecentCourses();
     setControlsBusy(false);
@@ -195,6 +267,7 @@ async function loadRecentCourse(): Promise<void> {
 }
 
 function renderSimulation(): void {
+  persistSimulationControls();
   const seed = Number(seedInput.value || "42");
   const handicap = Number(handicapInput.value || "12");
   const teeBoxId = teeBoxSelect.value;
@@ -293,8 +366,14 @@ function renderSimulation(): void {
 }
 
 simulateBtn.addEventListener("click", renderSimulation);
+seedInput.addEventListener("input", persistSimulationControls);
+handicapInput.addEventListener("input", persistSimulationControls);
+teeBoxSelect.addEventListener("change", persistSimulationControls);
 searchCourseBtn.addEventListener("click", () => {
   void runCourseSearch(courseQueryInput.value);
+});
+loadMoreBtn.addEventListener("click", () => {
+  loadMoreResults();
 });
 courseResultsSelect.addEventListener("change", () => {
   setControlsBusy(controlsBusy);
@@ -317,11 +396,25 @@ clearRecentBtn.addEventListener("click", () => {
 courseQueryInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
+    if (searchDebounceHandle) {
+      clearTimeout(searchDebounceHandle);
+      searchDebounceHandle = undefined;
+    }
     void runCourseSearch(courseQueryInput.value);
   }
 });
+courseQueryInput.addEventListener("input", () => {
+  if (searchDebounceHandle) {
+    clearTimeout(searchDebounceHandle);
+  }
+  searchDebounceHandle = window.setTimeout(() => {
+    searchDebounceHandle = undefined;
+    void runCourseSearch(courseQueryInput.value);
+  }, SEARCH_DEBOUNCE_MS);
+});
 
 populateTeeBoxes(currentCourse, "white");
+applyInitialSimulationControls();
 populateCourseResults();
 populateRecentCourses();
 setControlsBusy(false);
@@ -329,7 +422,9 @@ setControlsBusy(false);
 if (providerSource === "golfcourseapi") {
   setCourseStatus("Live provider enabled. Search and load a course from GolfCourseAPI.");
 } else {
-  setCourseStatus("Mock provider active. Set VITE_GOLFCOURSEAPI_KEY to enable live course search/load.");
+  setCourseStatus(
+    `Mock provider active. Type ${SEARCH_MIN_CHARS}+ chars to search. Set VITE_GOLFCOURSEAPI_KEY to enable live course search/load.`
+  );
 }
 
 renderSimulation();

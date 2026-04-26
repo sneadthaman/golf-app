@@ -81,10 +81,11 @@ The seed script upserts these Old Westbury Golf & Country Club course IDs:
 
 ## Next Up (Prioritized)
 
-- [x] Wire course provider into live app flow with runtime provider selection (GolfCourseAPI vs mock)
-- [x] Add saved/recent course history in UI so users can reload quickly
-- [x] Add provider-level retry/timeouts and user-friendly API error categories
-- [x] Add integration tests for the web course search/load flow
+- [x] Add end-to-end browser tests for full UI flows (search, load, simulate, recent reload, error states)
+- [x] Add query debounce + minimum-character threshold to course search to reduce unnecessary API calls (`4` chars, `250ms`)
+- [x] Add mobile-first incremental search loading (append results + `Load More` + offset state)
+- [x] Persist simulation controls (`seed`, `handicap`, selected tee box) across page reloads
+- [x] Add CI workflow to run `npm test` + `npm run build` on every push/PR
 
 ## Live Course UI Setup
 

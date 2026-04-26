@@ -117,4 +117,77 @@ describe("CourseFlowController integration", () => {
     expect(flow.getRecentCourses()).toHaveLength(0);
     expect(storage.getItem("golf-app.recent-courses.v1")).toBe("[]");
   });
+
+  test("minimum search length is enforced before provider call", async () => {
+    let searchCalls = 0;
+    const provider = {
+      async searchCourses() {
+        searchCalls += 1;
+        return [{ id: "a", name: "Course A", state: "NY" }];
+      },
+      async getCourse(courseId: string) {
+        return makeCourse(courseId, "Course A");
+      }
+    };
+
+    const flow = new CourseFlowController({ provider, minSearchChars: 4 });
+    flow.initialize();
+    const short = await flow.searchCourses("abc");
+    expect(short.ok).toBe(false);
+    expect(short.message).toContain("at least 4 characters");
+    expect(searchCalls).toBe(0);
+
+    const valid = await flow.searchCourses("abcd");
+    expect(valid.ok).toBe(true);
+    expect(searchCalls).toBe(1);
+  });
+
+  test("load more appends additional results until exhausted", async () => {
+    const provider = {
+      async searchCourses() {
+        return Array.from({ length: 5 }).map((_, idx) => ({
+          id: `c${idx + 1}`,
+          name: `Course ${idx + 1}`,
+          state: "NY"
+        }));
+      },
+      async getCourse(courseId: string) {
+        return makeCourse(courseId, `Course ${courseId}`);
+      }
+    };
+
+    const flow = new CourseFlowController({ provider, searchPageSize: 2 });
+    flow.initialize();
+
+    const initial = await flow.searchCourses("course");
+    expect(initial.ok).toBe(true);
+    expect(initial.results).toHaveLength(2);
+    expect(initial.hasMore).toBe(true);
+
+    const more1 = flow.loadMoreSearchResults();
+    expect(more1.ok).toBe(true);
+    expect(more1.results).toHaveLength(4);
+    expect(more1.hasMore).toBe(true);
+
+    const more2 = flow.loadMoreSearchResults();
+    expect(more2.ok).toBe(true);
+    expect(more2.results).toHaveLength(5);
+    expect(more2.hasMore).toBe(false);
+  });
+
+  test("load more without search returns a guard message", () => {
+    const provider = {
+      async searchCourses() {
+        return [];
+      },
+      async getCourse(courseId: string) {
+        return makeCourse(courseId, `Course ${courseId}`);
+      }
+    };
+    const flow = new CourseFlowController({ provider });
+    flow.initialize();
+    const outcome = flow.loadMoreSearchResults();
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toContain("Run a search");
+  });
 });
