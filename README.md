@@ -81,11 +81,11 @@ The seed script upserts these Old Westbury Golf & Country Club course IDs:
 
 ## Next Up (Prioritized)
 
-- [x] Add end-to-end browser tests for full UI flows (search, load, simulate, recent reload, error states)
-- [x] Add query debounce + minimum-character threshold to course search to reduce unnecessary API calls (`4` chars, `250ms`)
-- [x] Add mobile-first incremental search loading (append results + `Load More` + offset state)
-- [x] Persist simulation controls (`seed`, `handicap`, selected tee box) across page reloads
-- [x] Add CI workflow to run `npm test` + `npm run build` on every push/PR
+- [ ] Move incremental loading from client-side slicing to provider-backed paging (true API pagination)
+- [ ] Add structured API error UI states (auth, rate-limit, timeout, no-results) with targeted recovery actions
+- [ ] Add E2E CI job (Playwright) gated on PRs with artifact upload on failure
+- [ ] Add “Clear search/results” and keyboard-first interactions for faster dev-harness use
+- [ ] Define mobile app integration contract (shared search/load state model + API surface)
 
 ## Live Course UI Setup
 
