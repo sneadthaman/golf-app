@@ -100,47 +100,46 @@ function buildJunkEvents(
 function buildClosestEvents(
   roundId: string,
   round: Pick<Round, "courseHoles">,
-  teamIdByPlayerId: Record<string, string>,
+  playerIds: string[],
   rng: () => number
 ): ClosestEvent[] {
-  const players = Object.keys(teamIdByPlayerId);
   const events: ClosestEvent[] = [];
 
   for (const hole of round.courseHoles) {
     if (hole.par !== 3) continue;
     if (rng() < 0.2) {
-      events.push({ roundId, holeNumber: hole.holeNumber, winnerTeamId: null });
+      events.push({ roundId, holeNumber: hole.holeNumber, winnerPlayerId: null });
       continue;
     }
-    let winnerPlayer = players[0];
+    let winnerPlayer = playerIds[0];
     let winnerDistance = Number.POSITIVE_INFINITY;
-    for (const playerId of players) {
+    for (const playerId of playerIds) {
       const distanceFeet = rng() * 42 + 1;
       if (distanceFeet < winnerDistance) {
         winnerDistance = distanceFeet;
         winnerPlayer = playerId;
       }
     }
-    events.push({ roundId, holeNumber: hole.holeNumber, winnerTeamId: teamIdByPlayerId[winnerPlayer] });
+    events.push({ roundId, holeNumber: hole.holeNumber, winnerPlayerId: winnerPlayer });
   }
   return events;
 }
 
 function buildPar5CarryoverEvents(
   roundId: string,
-  round: Pick<Round, "courseHoles" | "holeResults">,
+  round: Pick<Round, "courseHoles">,
+  playerIds: string[],
   rng: () => number
 ): Par5CarryoverEvent[] {
   const events: Par5CarryoverEvent[] = [];
-  const resultByHole = new Map(round.holeResults.map((result) => [result.holeNumber, result]));
   for (const hole of round.courseHoles) {
     if (hole.par !== 5) continue;
     if (rng() < 0.25) {
-      events.push({ roundId, holeNumber: hole.holeNumber, winnerTeamId: null });
+      events.push({ roundId, holeNumber: hole.holeNumber, winnerPlayerId: null });
       continue;
     }
-    const result = resultByHole.get(hole.holeNumber);
-    events.push({ roundId, holeNumber: hole.holeNumber, winnerTeamId: result?.winningTeamId ?? null });
+    const winnerPlayerId = playerIds[Math.floor(rng() * playerIds.length)] ?? null;
+    events.push({ roundId, holeNumber: hole.holeNumber, winnerPlayerId });
   }
   return events;
 }
@@ -307,8 +306,9 @@ export function simulateSameHandicapRound(options: SameHandicapSimulationOptions
   }
 
   const junkEvents = buildJunkEvents(roundId, { courseHoles: course.holes, holeScores }, teamIdByPlayerId, rng);
-  const closestEvents = buildClosestEvents(roundId, { courseHoles: course.holes }, teamIdByPlayerId, rng);
-  const par5CarryoverEvents = buildPar5CarryoverEvents(roundId, { courseHoles: course.holes, holeResults }, rng);
+  const playerIds = players.map((player) => player.id);
+  const closestEvents = buildClosestEvents(roundId, { courseHoles: course.holes }, playerIds, rng);
+  const par5CarryoverEvents = buildPar5CarryoverEvents(roundId, { courseHoles: course.holes }, playerIds, rng);
 
   const round: Round = {
     id: roundId,

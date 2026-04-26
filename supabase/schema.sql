@@ -66,6 +66,8 @@ create table if not exists public.course_holes (
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
   external_player_ref text,
+  first_name text,
+  last_name text,
   display_name text not null,
   default_strokes_received int,
   last_used_strokes_received int,
@@ -73,8 +75,12 @@ create table if not exists public.players (
   updated_at timestamptz not null default now()
 );
 alter table if exists public.players add column if not exists external_player_ref text;
+alter table if exists public.players add column if not exists first_name text;
+alter table if exists public.players add column if not exists last_name text;
 create unique index if not exists players_external_player_ref_idx
   on public.players(external_player_ref);
+create unique index if not exists players_first_last_name_idx
+  on public.players(first_name, last_name);
 
 create table if not exists public.rounds (
   id uuid primary key default gen_random_uuid(),
@@ -164,6 +170,7 @@ create table if not exists public.round_closest_events (
   round_id uuid not null references public.rounds(id) on delete cascade,
   hole_number int not null check (hole_number > 0),
   track text not null check (track in ('par3', 'par5')),
+  winner_player_id uuid references public.players(id) on delete set null,
   winner_team_id uuid references public.round_teams(id) on delete set null,
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
@@ -215,4 +222,5 @@ alter table if exists public.rounds add column if not exists course_external_ref
 alter table if exists public.rounds add column if not exists course_name text;
 alter table if exists public.rounds add column if not exists tee_box_external_ref text;
 alter table if exists public.round_teams add column if not exists external_team_ref text;
+alter table if exists public.round_closest_events add column if not exists winner_player_id uuid;
 alter table if exists public.rounds alter column course_id drop not null;

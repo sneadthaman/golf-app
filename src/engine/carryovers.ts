@@ -10,6 +10,7 @@ export interface CarryoverEvaluationInput {
   courseHoles: CourseHole[];
   closestEvents: ClosestEvent[];
   par5CarryoverEvents: Par5CarryoverEvent[];
+  teamIdByPlayerId: Map<string, string>;
   roundId: string;
   state?: CarryoverState;
 }
@@ -30,13 +31,16 @@ export function evaluateClosestCarryovers(input: CarryoverEvaluationInput): Carr
   for (const event of sortedClosest) {
     const hole = holeByNumber.get(event.holeNumber);
     if (!hole || hole.par !== 3) continue;
-    if (event.winnerTeamId) {
+    if (event.winnerPlayerId) {
+      const teamId = input.teamIdByPlayerId.get(event.winnerPlayerId);
+      if (!teamId) continue;
       entries.push({
-        id: makeLedgerId("closest_par3", event.holeNumber, event.winnerTeamId),
+        id: makeLedgerId("closest_par3", event.holeNumber, teamId, event.winnerPlayerId),
         roundId: input.roundId,
         holeNumber: event.holeNumber,
         type: "closest_par3",
-        teamId: event.winnerTeamId,
+        teamId,
+        playerId: event.winnerPlayerId,
         points: state.par3ClosestBank,
         description: `Par 3 closest carryover won on hole ${event.holeNumber}`
       });
@@ -50,13 +54,16 @@ export function evaluateClosestCarryovers(input: CarryoverEvaluationInput): Carr
   for (const event of sortedPar5) {
     const hole = holeByNumber.get(event.holeNumber);
     if (!hole || hole.par !== 5) continue;
-    if (event.winnerTeamId) {
+    if (event.winnerPlayerId) {
+      const teamId = input.teamIdByPlayerId.get(event.winnerPlayerId);
+      if (!teamId) continue;
       entries.push({
-        id: makeLedgerId("par5_carryover", event.holeNumber, event.winnerTeamId),
+        id: makeLedgerId("par5_carryover", event.holeNumber, teamId, event.winnerPlayerId),
         roundId: input.roundId,
         holeNumber: event.holeNumber,
         type: "par5_carryover",
-        teamId: event.winnerTeamId,
+        teamId,
+        playerId: event.winnerPlayerId,
         points: state.par5Bank,
         description: `Par 5 carryover won on hole ${event.holeNumber}`
       });

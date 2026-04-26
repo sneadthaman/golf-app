@@ -14,9 +14,33 @@ export interface RoundSnapshotPayload {
   finalLedger: Array<Record<string, unknown>>;
 }
 
+export interface SavedRoundSummary {
+  roundId: string;
+  updatedAt: string;
+  courseName: string;
+  playerNames: string[];
+  holesCompleted: number;
+  status: "in_progress" | "completed" | "abandoned";
+}
+
+export interface SeasonJunkLeaderRow {
+  playerId: string;
+  playerName: string;
+  junkPoints: number;
+}
+
+export interface PlayerSearchResult {
+  id: string;
+  displayName: string;
+}
+
 interface SnapshotPlayer {
   id: string;
   name: string;
+  officialName: string;
+  displayName: string;
+  firstName?: string;
+  lastName?: string;
   defaultStrokesReceived?: number;
   lastUsedStrokesReceived?: number;
 }
@@ -45,7 +69,7 @@ interface SnapshotJunkEvent {
 
 interface SnapshotClosestEvent {
   holeNumber: number;
-  winnerTeamId: string | null;
+  winnerPlayerId: string | null;
 }
 
 interface SnapshotPress {
@@ -91,15 +115,93 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isRecordArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.every((item) => typeof item === "object" && item !== null);
+}
+
+function mapSnapshotStatus(value: unknown): RoundSnapshotPayload["status"] {
+  if (value === "complete" || value === "completed") return "complete";
+  return "active";
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function splitRequiredFirstLastName(fullName: string): { firstName: string; lastName: string } | null {
+  const normalized = fullName.trim().replace(/\s+/g, " ");
+  if (!normalized) return null;
+  const parts = normalized.split(" ");
+  if (parts.length < 2) return null;
+  const firstName = parts[0].trim();
+  const lastName = parts.slice(1).join(" ").trim();
+  if (!firstName || !lastName) return null;
+  return { firstName, lastName };
+}
+
+function normalizeNamePart(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function playerNameKey(firstName: string, lastName: string): string {
+  return `${normalizeNamePart(firstName)}::${normalizeNamePart(lastName)}`;
+}
+
+function mapDisplayStatus(rowStatus: unknown, roundMetadata: Record<string, unknown>): SavedRoundSummary["status"] {
+  const lifecycleStatus = roundMetadata.lifecycleStatus;
+  if (lifecycleStatus === "completed") return "completed";
+  if (lifecycleStatus === "abandoned") return "abandoned";
+  if (lifecycleStatus === "in_progress") return "in_progress";
+  if (rowStatus === "complete") return "completed";
+  return "in_progress";
+}
+
+function computeHolesCompleted(
+  holeScores: Array<Record<string, unknown>>,
+  playerCount: number
+): number {
+  if (!holeScores.length) return 0;
+  if (playerCount <= 0) {
+    return new Set(
+      holeScores
+        .map((item) => (typeof item.holeNumber === "number" ? item.holeNumber : null))
+        .filter((value): value is number => value !== null)
+    ).size;
+  }
+  const playersByHole = new Map<number, Set<string>>();
+  for (const score of holeScores) {
+    const holeNumber = typeof score.holeNumber === "number" ? score.holeNumber : null;
+    const playerId = typeof score.playerId === "string" ? score.playerId : null;
+    if (holeNumber === null || !playerId) continue;
+    const existing = playersByHole.get(holeNumber) ?? new Set<string>();
+    existing.add(playerId);
+    playersByHole.set(holeNumber, existing);
+  }
+  let completed = 0;
+  for (const players of playersByHole.values()) {
+    if (players.size >= playerCount) completed += 1;
+  }
+  return completed;
+}
+
 function toPlayers(items: Array<Record<string, unknown>>): SnapshotPlayer[] {
   return items
     .map((item) => {
       const id = typeof item.id === "string" ? item.id : "";
       const name = typeof item.name === "string" ? item.name : "";
       if (!id || !name) return null;
+      const officialName =
+        typeof item.officialName === "string" && item.officialName ? item.officialName : name;
+      const displayName =
+        typeof item.displayName === "string" && item.displayName ? item.displayName : name;
+      const split = splitRequiredFirstLastName(officialName) ?? undefined;
       return {
         id,
         name,
+        officialName,
+        displayName,
+        firstName: split?.firstName,
+        lastName: split?.lastName,
         defaultStrokesReceived:
           typeof item.defaultStrokesReceived === "number" ? item.defaultStrokesReceived : undefined,
         lastUsedStrokesReceived:
@@ -169,8 +271,8 @@ function toClosestEvents(items: Array<Record<string, unknown>>): SnapshotClosest
     .map((item) => {
       const holeNumber = typeof item.holeNumber === "number" ? item.holeNumber : NaN;
       if (!Number.isFinite(holeNumber)) return null;
-      const winnerTeamId = typeof item.winnerTeamId === "string" ? item.winnerTeamId : null;
-      return { holeNumber, winnerTeamId };
+      const winnerPlayerId = typeof item.winnerPlayerId === "string" ? item.winnerPlayerId : null;
+      return { holeNumber, winnerPlayerId };
     })
     .filter((item): item is SnapshotClosestEvent => item !== null);
 }
@@ -263,6 +365,154 @@ export async function saveRoundSnapshot(
   }
 }
 
+export async function listSavedRoundSummaries(
+  env: Record<string, string | undefined>,
+  limit = 20
+): Promise<SavedRoundSummary[]> {
+  const supabase = createSupabaseClient(env);
+  const { data, error } = await supabase
+    .from("round_snapshots")
+    .select("round_id,status,round_metadata,players,hole_scores,updated_at")
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    throw new Error(`Supabase list round snapshots failed: ${error.message}`);
+  }
+
+  return (data ?? [])
+    .map((row) => {
+      const roundId = typeof row.round_id === "string" ? row.round_id : "";
+      const updatedAt = typeof row.updated_at === "string" ? row.updated_at : "";
+      const roundMetadata = isObject(row.round_metadata) ? row.round_metadata : {};
+      const players = isRecordArray(row.players) ? row.players : [];
+      const holeScores = isRecordArray(row.hole_scores) ? row.hole_scores : [];
+      if (!roundId || !updatedAt) return null;
+      const playerNames = players
+        .map((item) => (typeof item.name === "string" ? item.name : ""))
+        .filter((name) => name.length > 0);
+      const courseName =
+        typeof roundMetadata.courseName === "string" && roundMetadata.courseName
+          ? roundMetadata.courseName
+          : "Unknown course";
+      return {
+        roundId,
+        updatedAt,
+        courseName,
+        playerNames,
+        holesCompleted: computeHolesCompleted(holeScores, playerNames.length),
+        status: mapDisplayStatus(row.status, roundMetadata)
+      } as SavedRoundSummary;
+    })
+    .filter((item): item is SavedRoundSummary => item !== null);
+}
+
+export async function loadRoundSnapshot(
+  roundId: string,
+  env: Record<string, string | undefined>
+): Promise<RoundSnapshotPayload> {
+  const supabase = createSupabaseClient(env);
+  const { data, error } = await supabase
+    .from("round_snapshots")
+    .select(
+      "round_id,status,round_metadata,players,teams,hole_scores,junk_events,closest_events_par3,closest_events_par5,presses,final_ledger"
+    )
+    .eq("round_id", roundId)
+    .single();
+  if (error || !data) {
+    throw new Error(`Supabase load round snapshot failed: ${error?.message ?? "not found"}`);
+  }
+
+  return {
+    roundId: typeof data.round_id === "string" ? data.round_id : roundId,
+    status: mapSnapshotStatus(data.status),
+    roundMetadata: isObject(data.round_metadata) ? data.round_metadata : {},
+    players: isRecordArray(data.players) ? data.players : [],
+    teams: isRecordArray(data.teams) ? data.teams : [],
+    holeScores: isRecordArray(data.hole_scores) ? data.hole_scores : [],
+    junkEvents: isRecordArray(data.junk_events) ? data.junk_events : [],
+    closestEventsPar3: isRecordArray(data.closest_events_par3) ? data.closest_events_par3 : [],
+    closestEventsPar5: isRecordArray(data.closest_events_par5) ? data.closest_events_par5 : [],
+    presses: isRecordArray(data.presses) ? data.presses : [],
+    finalLedger: isRecordArray(data.final_ledger) ? data.final_ledger : []
+  };
+}
+
+export async function searchPlayers(
+  env: Record<string, string | undefined>,
+  query: string,
+  limit = 20
+): Promise<PlayerSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const supabase = createSupabaseClient(env);
+  const { data, error } = await supabase
+    .from("players")
+    .select("id,display_name,first_name,last_name")
+    .or(`display_name.ilike.%${trimmed}%,first_name.ilike.%${trimmed}%,last_name.ilike.%${trimmed}%`)
+    .order("display_name", { ascending: true })
+    .limit(limit);
+  if (error) {
+    throw new Error(`Supabase player search failed: ${error.message}`);
+  }
+  return (data ?? [])
+    .map((row) => ({
+      id: typeof row.id === "string" ? row.id : "",
+      displayName:
+        typeof row.display_name === "string" && row.display_name
+          ? row.display_name
+          : `${typeof row.first_name === "string" ? row.first_name : ""} ${typeof row.last_name === "string" ? row.last_name : ""}`.trim()
+    }))
+    .filter((item) => item.id && item.displayName);
+}
+
+export async function getSeasonJunkLeaderboard(
+  env: Record<string, string | undefined>
+): Promise<SeasonJunkLeaderRow[]> {
+  const supabase = createSupabaseClient(env);
+  const { data, error } = await supabase
+    .from("round_snapshots")
+    .select("round_metadata,players,final_ledger");
+  if (error) {
+    throw new Error(`Supabase leaderboard query failed: ${error.message}`);
+  }
+
+  const includeTypes = new Set(["junk", "hole_in_one", "closest_par3", "par5_carryover"]);
+  const totalsByPlayerId = new Map<string, number>();
+  const nameByPlayerId = new Map<string, string>();
+
+  for (const row of data ?? []) {
+    const metadata = isObject(row.round_metadata) ? row.round_metadata : {};
+    if (metadata.lifecycleStatus === "abandoned") continue;
+    const players = isRecordArray(row.players) ? row.players : [];
+    for (const player of players) {
+      const playerId = typeof player.id === "string" ? player.id : "";
+      const playerName = typeof player.name === "string" ? player.name : "";
+      if (!playerId) continue;
+      if (playerName) nameByPlayerId.set(playerId, playerName);
+      if (!totalsByPlayerId.has(playerId)) totalsByPlayerId.set(playerId, 0);
+    }
+
+    const ledger = isRecordArray(row.final_ledger) ? row.final_ledger : [];
+    for (const entry of ledger) {
+      const type = typeof entry.type === "string" ? entry.type : "";
+      if (!includeTypes.has(type)) continue;
+      const points = typeof entry.points === "number" ? entry.points : NaN;
+      if (!Number.isFinite(points)) continue;
+      const playerId = typeof entry.playerId === "string" ? entry.playerId : "";
+      if (!playerId) continue;
+      totalsByPlayerId.set(playerId, (totalsByPlayerId.get(playerId) ?? 0) + points);
+    }
+  }
+
+  return [...totalsByPlayerId.entries()]
+    .map(([playerId, junkPoints]) => ({
+      playerId,
+      playerName: nameByPlayerId.get(playerId) ?? playerId,
+      junkPoints
+    }))
+    .sort((a, b) => b.junkPoints - a.junkPoints || a.playerName.localeCompare(b.playerName));
+}
+
 export async function saveRoundNormalized(
   payload: RoundSnapshotPayload,
   env: Record<string, string | undefined>
@@ -302,26 +552,76 @@ export async function saveRoundNormalized(
   if (!players.length) {
     throw new Error("No players available to persist.");
   }
-  const { data: playerRows, error: playerError } = await supabase
-    .from("players")
-    .upsert(
-      players.map((player) => ({
-        external_player_ref: player.id,
-        display_name: player.name,
-        default_strokes_received: player.defaultStrokesReceived ?? null,
-        last_used_strokes_received: player.lastUsedStrokesReceived ?? null,
-        updated_at: new Date().toISOString()
-      })),
-      { onConflict: "external_player_ref" }
-    )
-    .select("id, external_player_ref");
-  if (playerError) {
-    throw new Error(`Supabase players upsert failed: ${playerError.message}`);
-  }
   const playerIdByExternalId = new Map<string, string>();
-  for (const row of playerRows ?? []) {
-    if (typeof row.external_player_ref === "string" && typeof row.id === "string") {
-      playerIdByExternalId.set(row.external_player_ref, row.id);
+  const linkedPlayers = players.filter((player) => isUuid(player.id));
+  const externalPlayers = players.filter((player) => !isUuid(player.id));
+
+  if (linkedPlayers.length) {
+    const { data: linkedRows, error: linkedError } = await supabase
+      .from("players")
+      .upsert(
+        linkedPlayers.map((player) => ({
+          id: player.id,
+          first_name: player.firstName ?? null,
+          last_name: player.lastName ?? null,
+          display_name: player.officialName,
+          default_strokes_received: player.defaultStrokesReceived ?? null,
+          last_used_strokes_received: player.lastUsedStrokesReceived ?? null,
+          updated_at: new Date().toISOString()
+        })),
+        { onConflict: "id" }
+      )
+      .select("id");
+    if (linkedError) {
+      throw new Error(`Supabase linked players upsert failed: ${linkedError.message}`);
+    }
+    for (const row of linkedRows ?? []) {
+      if (typeof row.id === "string") {
+        playerIdByExternalId.set(row.id, row.id);
+      }
+    }
+  }
+
+  if (externalPlayers.length) {
+    const invalid = externalPlayers.find((player) => !player.firstName || !player.lastName);
+    if (invalid) {
+      throw new Error(
+        `Player "${invalid.officialName}" must include first and last name (e.g. "Sam Janvey") before saving.`
+      );
+    }
+    const { data: playerRows, error: playerError } = await supabase
+      .from("players")
+      .upsert(
+        externalPlayers.map((player) => ({
+          first_name: normalizeNamePart(player.firstName!),
+          last_name: normalizeNamePart(player.lastName!),
+          external_player_ref: `name:${playerNameKey(player.firstName!, player.lastName!)}`,
+          display_name: player.officialName,
+          default_strokes_received: player.defaultStrokesReceived ?? null,
+          last_used_strokes_received: player.lastUsedStrokesReceived ?? null,
+          updated_at: new Date().toISOString()
+        })),
+        { onConflict: "first_name,last_name" }
+      )
+      .select("id, first_name, last_name");
+    if (playerError) {
+      throw new Error(`Supabase players upsert failed: ${playerError.message}`);
+    }
+    const playerIdByNameKey = new Map<string, string>();
+    for (const row of playerRows ?? []) {
+      if (
+        typeof row.id === "string" &&
+        typeof row.first_name === "string" &&
+        typeof row.last_name === "string"
+      ) {
+        playerIdByNameKey.set(playerNameKey(row.first_name, row.last_name), row.id);
+      }
+    }
+    for (const player of externalPlayers) {
+      const dbId = playerIdByNameKey.get(playerNameKey(player.firstName!, player.lastName!));
+      if (dbId) {
+        playerIdByExternalId.set(player.id, dbId);
+      }
     }
   }
   for (const player of players) {
@@ -487,9 +787,15 @@ export async function saveRoundNormalized(
         round_id: roundDbId,
         hole_number: event.holeNumber,
         track: event.track,
-        winner_team_id: event.winnerTeamId ? (teamIdByExternalId.get(event.winnerTeamId) ?? null) : null,
+        winner_player_id: event.winnerPlayerId ? (playerIdByExternalId.get(event.winnerPlayerId) ?? null) : null,
+        winner_team_id: event.winnerPlayerId
+          ? (() => {
+              const sourceTeamExternal = teamExternalByPlayerExternal.get(event.winnerPlayerId);
+              return sourceTeamExternal ? (teamIdByExternalId.get(sourceTeamExternal) ?? null) : null;
+            })()
+          : null,
         payload: {
-          source_winner_team_id: event.winnerTeamId
+          source_winner_player_id: event.winnerPlayerId
         },
         updated_at: new Date().toISOString()
       }))

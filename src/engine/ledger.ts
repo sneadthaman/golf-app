@@ -8,13 +8,20 @@ export function calculateLedger(round: Round): LedgerEntry[] {
   const entries: LedgerEntry[] = [];
   entries.push(...evaluateMainBets(round));
   if (round.settings.junkEnabled) {
+    const teamIdByPlayerId = new Map<string, string>();
+    for (const team of round.teams) {
+      for (const playerId of team.playerIds) {
+        teamIdByPlayerId.set(playerId, team.id);
+      }
+    }
     entries.push(...evaluateJunkEvents(round.junkEvents));
     entries.push(
       ...evaluateClosestCarryovers({
         roundId: round.id,
         courseHoles: round.courseHoles,
         closestEvents: round.closestEvents,
-        par5CarryoverEvents: round.par5CarryoverEvents
+        par5CarryoverEvents: round.par5CarryoverEvents,
+        teamIdByPlayerId
       }).entries
     );
   }

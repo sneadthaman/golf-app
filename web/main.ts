@@ -12,13 +12,34 @@ import {
   JunkType
 } from "../src";
 import { CourseFlowController, formatCourseLabel } from "./courseFlow";
-import { RoundSnapshotPayload, saveRoundNormalized, saveRoundSnapshot } from "./persistence";
+import {
+  PlayerSearchResult,
+  RoundSnapshotPayload,
+  SeasonJunkLeaderRow,
+  SavedRoundSummary,
+  getSeasonJunkLeaderboard,
+  listSavedRoundSummaries,
+  loadRoundSnapshot,
+  searchPlayers,
+  saveRoundNormalized,
+  saveRoundSnapshot
+} from "./persistence";
 
 const seedInput = document.querySelector<HTMLInputElement>("#seed");
 const handicapInput = document.querySelector<HTMLInputElement>("#handicap");
 const teeBoxSelect = document.querySelector<HTMLSelectElement>("#teeBox");
 const simulateBtn = document.querySelector<HTMLButtonElement>("#simulateBtn");
 const saveRoundBtn = document.querySelector<HTMLButtonElement>("#saveRoundBtn");
+const abandonRoundBtn = document.querySelector<HTMLButtonElement>("#abandonRoundBtn");
+const playerQueryInput = document.querySelector<HTMLInputElement>("#playerQuery");
+const searchPlayerBtn = document.querySelector<HTMLButtonElement>("#searchPlayerBtn");
+const playerResultsSelect = document.querySelector<HTMLSelectElement>("#playerResults");
+const assignPlayerSlotSelect = document.querySelector<HTMLSelectElement>("#assignPlayerSlot");
+const assignPlayerBtn = document.querySelector<HTMLButtonElement>("#assignPlayerBtn");
+const playerStatusEl = document.querySelector<HTMLElement>("#playerStatus");
+const savedRoundsSelect = document.querySelector<HTMLSelectElement>("#savedRounds");
+const refreshSavedRoundsBtn = document.querySelector<HTMLButtonElement>("#refreshSavedRoundsBtn");
+const loadSavedRoundBtn = document.querySelector<HTMLButtonElement>("#loadSavedRoundBtn");
 const holeHeaderRowEl = document.querySelector<HTMLElement>("#holeHeaderRow");
 const summaryEl = document.querySelector<HTMLElement>("#summary");
 const holeRowsEl = document.querySelector<HTMLElement>("#holeRows");
@@ -35,10 +56,15 @@ const loadRecentBtn = document.querySelector<HTMLButtonElement>("#loadRecentBtn"
 const clearRecentBtn = document.querySelector<HTMLButtonElement>("#clearRecentBtn");
 const courseStatusEl = document.querySelector<HTMLElement>("#courseStatus");
 const saveStatusEl = document.querySelector<HTMLElement>("#saveStatus");
+const savedRoundsStatusEl = document.querySelector<HTMLElement>("#savedRoundsStatus");
 const player1NameInput = document.querySelector<HTMLInputElement>("#player1Name");
+const player1DisplayInput = document.querySelector<HTMLInputElement>("#player1Display");
 const player2NameInput = document.querySelector<HTMLInputElement>("#player2Name");
+const player2DisplayInput = document.querySelector<HTMLInputElement>("#player2Display");
 const player3NameInput = document.querySelector<HTMLInputElement>("#player3Name");
+const player3DisplayInput = document.querySelector<HTMLInputElement>("#player3Display");
 const player4NameInput = document.querySelector<HTMLInputElement>("#player4Name");
+const player4DisplayInput = document.querySelector<HTMLInputElement>("#player4Display");
 const player1TeamSelect = document.querySelector<HTMLSelectElement>("#player1Team");
 const player2TeamSelect = document.querySelector<HTMLSelectElement>("#player2Team");
 const player3TeamSelect = document.querySelector<HTMLSelectElement>("#player3Team");
@@ -71,6 +97,8 @@ const closestWinnerSelect = document.querySelector<HTMLSelectElement>("#closestW
 const addClosestBtn = document.querySelector<HTMLButtonElement>("#addClosestBtn");
 const closestStatusEl = document.querySelector<HTMLElement>("#closestStatus");
 const closestRowsEl = document.querySelector<HTMLElement>("#closestRows");
+const seasonLeaderboardStatusEl = document.querySelector<HTMLElement>("#seasonLeaderboardStatus");
+const seasonLeaderboardRowsEl = document.querySelector<HTMLElement>("#seasonLeaderboardRows");
 
 if (
   !seedInput ||
@@ -78,6 +106,16 @@ if (
   !teeBoxSelect ||
   !simulateBtn ||
   !saveRoundBtn ||
+  !abandonRoundBtn ||
+  !playerQueryInput ||
+  !searchPlayerBtn ||
+  !playerResultsSelect ||
+  !assignPlayerSlotSelect ||
+  !assignPlayerBtn ||
+  !playerStatusEl ||
+  !savedRoundsSelect ||
+  !refreshSavedRoundsBtn ||
+  !loadSavedRoundBtn ||
   !holeHeaderRowEl ||
   !summaryEl ||
   !holeRowsEl ||
@@ -94,10 +132,15 @@ if (
   !clearRecentBtn ||
   !courseStatusEl ||
   !saveStatusEl ||
+  !savedRoundsStatusEl ||
   !player1NameInput ||
+  !player1DisplayInput ||
   !player2NameInput ||
+  !player2DisplayInput ||
   !player3NameInput ||
+  !player3DisplayInput ||
   !player4NameInput ||
+  !player4DisplayInput ||
   !player1TeamSelect ||
   !player2TeamSelect ||
   !player3TeamSelect ||
@@ -129,12 +172,21 @@ if (
   !closestWinnerSelect ||
   !addClosestBtn ||
   !closestStatusEl ||
-  !closestRowsEl
+  !closestRowsEl ||
+  !seasonLeaderboardStatusEl ||
+  !seasonLeaderboardRowsEl
 ) {
   throw new Error("Missing required DOM elements");
 }
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+const runtimeEnv = env ?? {};
+const hasSupabaseEnv = Boolean(
+  (runtimeEnv.VITE_SUPABASE_URL ?? runtimeEnv.SUPABASE_URL) &&
+    (runtimeEnv.VITE_SUPABASE_SERVICE_ROLE_KEY ??
+      runtimeEnv.VITE_SUPABASE_ANON_KEY ??
+      runtimeEnv.SUPABASE_SERVICE_ROLE_KEY)
+);
 const { provider: courseProvider, source: providerSource } = createCourseProvider({
   golfCourseApiKey: env?.VITE_GOLFCOURSEAPI_KEY ?? env?.GOLFCOURSEAPI_KEY,
   golfCourseApiBaseUrl: env?.VITE_GOLFCOURSEAPI_BASE_URL ?? env?.GOLFCOURSEAPI_BASE_URL
@@ -168,7 +220,8 @@ type SetupTeamId = "teamA" | "teamB";
 interface RoundSetupState {
   players: Array<{
     id: string;
-    name: string;
+    fullName: string;
+    displayName: string;
     teamId: SetupTeamId;
     strokesReceived: number;
   }>;
@@ -197,8 +250,16 @@ interface ComputedHoleState {
 let roundSetup: RoundSetupState | undefined;
 const scoreEntryValues = new Map<string, string>();
 const manualJunkEvents: Array<{ holeNumber: number; playerId: string; type: JunkType }> = [];
-const manualClosestEvents: Array<{ holeNumber: number; track: "par3" | "par5"; winnerTeamId: "teamA" | "teamB" | null }> = [];
+const manualClosestEvents: Array<{ holeNumber: number; track: "par3" | "par5"; winnerPlayerId: string | null }> = [];
 let latestRoundSnapshot: RoundSnapshotPayload | undefined;
+let savedRoundSummaries: SavedRoundSummary[] = [];
+let seasonJunkLeaders: SeasonJunkLeaderRow[] = [];
+let playerSearchResults: PlayerSearchResult[] = [];
+const selectedPlayerDbIdsBySlot: Array<string | undefined> = [undefined, undefined, undefined, undefined];
+let autoSaveTimeoutHandle: number | undefined;
+let autoSaveInFlight = false;
+let autoSaveQueued = false;
+let suppressAutoSave = false;
 
 function setCourseStatus(message: string, isError = false): void {
   courseStatusEl.textContent = message;
@@ -208,6 +269,11 @@ function setCourseStatus(message: string, isError = false): void {
 function setSetupStatus(message: string, isError = false): void {
   setupStatusEl.textContent = message;
   setupStatusEl.classList.toggle("error", isError);
+}
+
+function setPlayerStatus(message: string, isError = false): void {
+  playerStatusEl.textContent = message;
+  playerStatusEl.classList.toggle("error", isError);
 }
 
 function setJunkStatus(message: string, isError = false): void {
@@ -225,6 +291,16 @@ function setClosestStatus(message: string, isError = false): void {
   closestStatusEl.classList.toggle("error", isError);
 }
 
+function setSavedRoundsStatus(message: string, isError = false): void {
+  savedRoundsStatusEl.textContent = message;
+  savedRoundsStatusEl.classList.toggle("error", isError);
+}
+
+function setSeasonLeaderboardStatus(message: string, isError = false): void {
+  seasonLeaderboardStatusEl.textContent = message;
+  seasonLeaderboardStatusEl.classList.toggle("error", isError);
+}
+
 function setControlsBusy(isBusy: boolean): void {
   controlsBusy = isBusy;
   const searchResults = courseFlow.getSearchResults();
@@ -238,6 +314,14 @@ function setControlsBusy(isBusy: boolean): void {
   recentCoursesSelect.disabled = isBusy || recentCourses.length === 0;
   loadRecentBtn.disabled = isBusy || recentCourses.length === 0 || !recentCoursesSelect.value;
   clearRecentBtn.disabled = isBusy || recentCourses.length === 0;
+  searchPlayerBtn.disabled = isBusy;
+  playerResultsSelect.disabled = isBusy || playerSearchResults.length === 0;
+  assignPlayerSlotSelect.disabled = isBusy;
+  assignPlayerBtn.disabled = isBusy || playerSearchResults.length === 0 || !playerResultsSelect.value;
+  abandonRoundBtn.disabled = isBusy;
+  refreshSavedRoundsBtn.disabled = isBusy;
+  savedRoundsSelect.disabled = isBusy || savedRoundSummaries.length === 0;
+  loadSavedRoundBtn.disabled = isBusy || savedRoundSummaries.length === 0 || !savedRoundsSelect.value;
 }
 
 function escapeHtml(text: string): string {
@@ -259,6 +343,11 @@ function parseNonNegativeNumber(value: string): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return null;
   return parsed;
+}
+
+function hasFirstAndLastName(name: string): boolean {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.length >= 2;
 }
 
 function strokeCountForHole(handicap: number, holeHandicapIndex: number): number {
@@ -298,6 +387,439 @@ function statusLabel(status: { state: "teamAUp" | "teamBUp" | "tied"; teamAUp: n
   if (status.state === "teamAUp") return `Team A ${status.teamAUp} up`;
   if (status.state === "teamBUp") return `Team B ${status.teamBUp} up`;
   return "Tied";
+}
+
+function formatSavedRoundLabel(item: SavedRoundSummary): string {
+  const updated = new Date(item.updatedAt);
+  const updatedLabel = Number.isNaN(updated.getTime())
+    ? item.updatedAt
+    : updated.toLocaleString(undefined, {
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      });
+  const playersLabel = item.playerNames.join("/") || "Players unknown";
+  const statusLabel =
+    item.status === "completed" ? "completed" : item.status === "abandoned" ? "abandoned" : "in-progress";
+  return `${updatedLabel} | ${item.courseName} | ${playersLabel} | ${item.holesCompleted} holes | ${statusLabel}`;
+}
+
+function fallbackPlayerId(_name: string, slotIndex: number): string {
+  return `p${slotIndex + 1}`;
+}
+
+function populatePlayerResults(): void {
+  playerResultsSelect.replaceChildren();
+  if (!playerSearchResults.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No players";
+    playerResultsSelect.append(option);
+    setControlsBusy(controlsBusy);
+    return;
+  }
+  for (const player of playerSearchResults) {
+    const option = document.createElement("option");
+    option.value = player.id;
+    option.textContent = player.displayName;
+    playerResultsSelect.append(option);
+  }
+  setControlsBusy(controlsBusy);
+}
+
+async function runPlayerSearch(query: string): Promise<void> {
+  if (!hasSupabaseEnv) {
+    setPlayerStatus("Supabase env not configured for player search.", true);
+    return;
+  }
+  const trimmed = query.trim();
+  if (!trimmed) {
+    playerSearchResults = [];
+    populatePlayerResults();
+    setPlayerStatus("Enter a player name to search.", true);
+    return;
+  }
+
+  searchPlayerBtn.disabled = true;
+  setPlayerStatus("Searching players...");
+  try {
+    playerSearchResults = await searchPlayers(runtimeEnv, trimmed, 20);
+    populatePlayerResults();
+    if (!playerSearchResults.length) {
+      setPlayerStatus(`No players found for "${trimmed}".`, true);
+      return;
+    }
+    setPlayerStatus(`Found ${playerSearchResults.length} player(s). Select one and assign to a slot.`);
+  } catch (error) {
+    playerSearchResults = [];
+    populatePlayerResults();
+    setPlayerStatus(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    searchPlayerBtn.disabled = false;
+  }
+}
+
+function assignSelectedPlayerToSlot(): void {
+  const playerId = playerResultsSelect.value;
+  const slotIndex = Number(assignPlayerSlotSelect.value);
+  if (!playerId || !Number.isFinite(slotIndex) || slotIndex < 0 || slotIndex > 3) {
+    setPlayerStatus("Select a player and slot first.", true);
+    return;
+  }
+  const player = playerSearchResults.find((item) => item.id === playerId);
+  if (!player) {
+    setPlayerStatus("Selected player not found in current results.", true);
+    return;
+  }
+
+  const nameInputs = [player1NameInput, player2NameInput, player3NameInput, player4NameInput];
+  const displayInputs = [player1DisplayInput, player2DisplayInput, player3DisplayInput, player4DisplayInput];
+  selectedPlayerDbIdsBySlot[slotIndex] = player.id;
+  nameInputs[slotIndex].value = player.displayName;
+  displayInputs[slotIndex].value = player.displayName;
+  setPlayerStatus(`Assigned ${player.displayName} to Player ${slotIndex + 1}.`);
+  if (roundSetup && applyRoundSetup()) {
+    renderSimulation();
+  }
+}
+
+function renderSeasonLeaderboard(): void {
+  if (!seasonJunkLeaders.length) {
+    seasonLeaderboardRowsEl.innerHTML = `<tr><td colspan="3">No season junk points yet.</td></tr>`;
+    return;
+  }
+  seasonLeaderboardRowsEl.innerHTML = seasonJunkLeaders
+    .map((leader, idx) => {
+      const crown = idx === 0 ? " 👑" : "";
+      return `<tr><td>${idx + 1}</td><td>${escapeHtml(`${leader.playerName}${crown}`)}</td><td>${leader.junkPoints}</td></tr>`;
+    })
+    .join("");
+}
+
+function populateSavedRounds(): void {
+  savedRoundsSelect.replaceChildren();
+  if (!savedRoundSummaries.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No saved rounds";
+    savedRoundsSelect.append(option);
+    loadSavedRoundBtn.disabled = true;
+    return;
+  }
+  for (const round of savedRoundSummaries) {
+    const option = document.createElement("option");
+    option.value = round.roundId;
+    option.textContent = formatSavedRoundLabel(round);
+    savedRoundsSelect.append(option);
+  }
+  loadSavedRoundBtn.disabled = false;
+}
+
+async function persistCurrentRound(mode: "manual" | "auto"): Promise<void> {
+  if (!hasSupabaseEnv) {
+    throw new Error("Supabase env not configured (VITE_SUPABASE_URL + key required).");
+  }
+  if (!latestRoundSnapshot) {
+    if (mode === "manual") {
+      throw new Error("Run simulation or enter scores first so there is a round to save.");
+    }
+    return;
+  }
+  await saveRoundSnapshot(latestRoundSnapshot, runtimeEnv);
+  await saveRoundNormalized(latestRoundSnapshot, runtimeEnv);
+}
+
+async function saveRoundManually(): Promise<void> {
+  if (!hasSupabaseEnv) {
+    setSaveStatus("Supabase env not configured for saving.", true);
+    return;
+  }
+  saveRoundBtn.disabled = true;
+  setSaveStatus("Saving round to Supabase (snapshot + normalized tables)...");
+  try {
+    await persistCurrentRound("manual");
+    setSaveStatus(`Saved round ${latestRoundSnapshot?.roundId ?? ""} to Supabase (snapshot + normalized records).`);
+    await refreshSavedRounds();
+    await refreshSeasonLeaderboard();
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    saveRoundBtn.disabled = false;
+  }
+}
+
+async function markRoundAbandoned(): Promise<void> {
+  if (!hasSupabaseEnv) {
+    setSaveStatus("Supabase env not configured for saving.", true);
+    return;
+  }
+  if (!latestRoundSnapshot) {
+    setSaveStatus("Run simulation or enter scores first so there is a round to update.", true);
+    return;
+  }
+  if (latestRoundSnapshot.status === "complete") {
+    setSaveStatus("Completed rounds cannot be marked abandoned.", true);
+    return;
+  }
+
+  latestRoundSnapshot.roundMetadata = {
+    ...latestRoundSnapshot.roundMetadata,
+    lifecycleStatus: "abandoned"
+  };
+
+  abandonRoundBtn.disabled = true;
+  setSaveStatus(`Marking round ${latestRoundSnapshot.roundId} as abandoned...`);
+  try {
+    await persistCurrentRound("manual");
+    setSaveStatus(`Round ${latestRoundSnapshot.roundId} marked abandoned.`);
+    await refreshSavedRounds();
+    await refreshSeasonLeaderboard();
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    abandonRoundBtn.disabled = false;
+  }
+}
+
+function queueAutoSave(): void {
+  if (suppressAutoSave || !latestRoundSnapshot || !hasSupabaseEnv) return;
+  if (autoSaveTimeoutHandle) {
+    clearTimeout(autoSaveTimeoutHandle);
+  }
+  autoSaveTimeoutHandle = window.setTimeout(() => {
+    autoSaveTimeoutHandle = undefined;
+    void flushAutoSave();
+  }, 600);
+}
+
+async function flushAutoSave(): Promise<void> {
+  if (!latestRoundSnapshot || suppressAutoSave) return;
+  if (autoSaveInFlight) {
+    autoSaveQueued = true;
+    return;
+  }
+  autoSaveInFlight = true;
+  try {
+    await persistCurrentRound("auto");
+    setSaveStatus(`Auto-saved ${latestRoundSnapshot.roundId}.`);
+    await refreshSavedRounds();
+    await refreshSeasonLeaderboard();
+  } catch (error) {
+    setSaveStatus(`Auto-save failed: ${error instanceof Error ? error.message : String(error)}`, true);
+  } finally {
+    autoSaveInFlight = false;
+    if (autoSaveQueued) {
+      autoSaveQueued = false;
+      void flushAutoSave();
+    }
+  }
+}
+
+async function refreshSavedRounds(): Promise<void> {
+  if (!hasSupabaseEnv) {
+    savedRoundSummaries = [];
+    populateSavedRounds();
+    setSavedRoundsStatus("Supabase env not configured for saved rounds.");
+    return;
+  }
+  refreshSavedRoundsBtn.disabled = true;
+  try {
+    savedRoundSummaries = await listSavedRoundSummaries(runtimeEnv);
+    populateSavedRounds();
+    const count = savedRoundSummaries.length;
+    setSavedRoundsStatus(count ? `Loaded ${count} saved round${count === 1 ? "" : "s"}.` : "No saved rounds found.");
+  } catch (error) {
+    populateSavedRounds();
+    setSavedRoundsStatus(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    refreshSavedRoundsBtn.disabled = false;
+  }
+}
+
+async function refreshSeasonLeaderboard(): Promise<void> {
+  if (!hasSupabaseEnv) {
+    seasonJunkLeaders = [];
+    renderSeasonLeaderboard();
+    setSeasonLeaderboardStatus("Supabase env not configured for leaderboard.");
+    return;
+  }
+  try {
+    seasonJunkLeaders = await getSeasonJunkLeaderboard(runtimeEnv);
+    renderSeasonLeaderboard();
+    setSeasonLeaderboardStatus(
+      seasonJunkLeaders.length
+        ? `Season leaderboard updated (${seasonJunkLeaders.length} players).`
+        : "No season junk points yet."
+    );
+  } catch (error) {
+    seasonJunkLeaders = [];
+    renderSeasonLeaderboard();
+    setSeasonLeaderboardStatus(error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+function toRecordArray(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return Array.isArray(items) ? items.filter((item) => typeof item === "object" && item !== null) : [];
+}
+
+async function applySavedRoundSnapshot(snapshot: RoundSnapshotPayload): Promise<void> {
+  const metadata = snapshot.roundMetadata;
+  const courseId = typeof metadata.courseId === "string" ? metadata.courseId : "";
+  const teeBoxId = typeof metadata.teeBoxId === "string" ? metadata.teeBoxId : undefined;
+  const seedValue = typeof metadata.seed === "number" ? String(metadata.seed) : typeof metadata.seed === "string" ? metadata.seed : "42";
+  seedInput.value = seedValue;
+
+  if (!courseId) {
+    throw new Error("Saved round is missing courseId metadata.");
+  }
+
+  setCourseStatus("Loading course for saved round...");
+  const loadedCourse = await courseProvider.getCourse(courseId);
+  currentCourse = loadedCourse;
+  populateTeeBoxes(currentCourse, teeBoxId);
+  populateRecentCourses();
+  setCourseStatus(`Loaded ${currentCourse.name} from saved round.`);
+
+  const playersRaw = toRecordArray(snapshot.players).slice(0, 4);
+  const teamsRaw = toRecordArray(snapshot.teams);
+  if (playersRaw.length !== 4) {
+    throw new Error("Saved round must include exactly 4 players.");
+  }
+
+  const teamByPlayerId = new Map<string, SetupTeamId>();
+  for (const team of teamsRaw) {
+    const teamId = team.id === "teamA" || team.id === "teamB" ? (team.id as SetupTeamId) : null;
+    const playerIds = Array.isArray(team.playerIds) ? team.playerIds : [];
+    if (!teamId) continue;
+    for (const playerId of playerIds) {
+      if (typeof playerId === "string") {
+        teamByPlayerId.set(playerId, teamId);
+      }
+    }
+  }
+
+  const playerNameInputs = [player1NameInput, player2NameInput, player3NameInput, player4NameInput];
+  const playerDisplayInputs = [player1DisplayInput, player2DisplayInput, player3DisplayInput, player4DisplayInput];
+  const playerTeamInputs = [player1TeamSelect, player2TeamSelect, player3TeamSelect, player4TeamSelect];
+  const playerStrokeInputs = [player1StrokesInput, player2StrokesInput, player3StrokesInput, player4StrokesInput];
+
+  for (let i = 0; i < playersRaw.length; i += 1) {
+    const player = playersRaw[i];
+    const playerId = typeof player.id === "string" ? player.id : `p${i + 1}`;
+    const playerName =
+      typeof player.officialName === "string" && player.officialName
+        ? player.officialName
+        : typeof player.name === "string"
+          ? player.name
+          : `Player ${i + 1}`;
+    const playerDisplayName =
+      typeof player.displayName === "string" && player.displayName
+        ? player.displayName
+        : typeof player.name === "string" && player.name
+          ? player.name
+          : playerName;
+    const strokes =
+      typeof player.lastUsedStrokesReceived === "number"
+        ? player.lastUsedStrokesReceived
+        : typeof player.defaultStrokesReceived === "number"
+          ? player.defaultStrokesReceived
+          : 0;
+    playerNameInputs[i].value = playerName;
+    playerDisplayInputs[i].value = playerDisplayName;
+    playerTeamInputs[i].value = teamByPlayerId.get(playerId) ?? (i < 2 ? "teamA" : "teamB");
+    playerStrokeInputs[i].value = String(strokes);
+    selectedPlayerDbIdsBySlot[i] = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(playerId)
+      ? playerId
+      : undefined;
+  }
+
+  const settings =
+    typeof metadata.settings === "object" && metadata.settings !== null
+      ? (metadata.settings as Record<string, unknown>)
+      : {};
+  const roundSetupMeta =
+    typeof metadata.roundSetup === "object" && metadata.roundSetup !== null
+      ? (metadata.roundSetup as Record<string, unknown>)
+      : {};
+  const pointsMeta =
+    typeof roundSetupMeta.points === "object" && roundSetupMeta.points !== null
+      ? (roundSetupMeta.points as Record<string, unknown>)
+      : {};
+
+  const frontPoints = typeof pointsMeta.front === "number" ? pointsMeta.front : Number(settings.frontValuePoints ?? 2);
+  const backPoints = typeof pointsMeta.back === "number" ? pointsMeta.back : Number(settings.backValuePoints ?? 3);
+  const overallPoints =
+    typeof pointsMeta.overall === "number" ? pointsMeta.overall : Number(settings.overallValuePoints ?? 4);
+  const pressPoints = typeof pointsMeta.press === "number" ? pointsMeta.press : Number(settings.pressValuePoints ?? 1);
+  frontPointsInput.value = String(Number.isFinite(frontPoints) && frontPoints > 0 ? frontPoints : 2);
+  backPointsInput.value = String(Number.isFinite(backPoints) && backPoints > 0 ? backPoints : 3);
+  overallPointsInput.value = String(Number.isFinite(overallPoints) && overallPoints > 0 ? overallPoints : 4);
+  pressPointsInput.value = String(Number.isFinite(pressPoints) && pressPoints > 0 ? pressPoints : 1);
+  doubleGameInput.checked = roundSetupMeta.doubleGame === true;
+
+  scoreEntryValues.clear();
+  for (const score of toRecordArray(snapshot.holeScores)) {
+    const holeNumber = typeof score.holeNumber === "number" ? score.holeNumber : NaN;
+    const playerId = typeof score.playerId === "string" ? score.playerId : "";
+    const grossScore = typeof score.grossScore === "number" ? score.grossScore : NaN;
+    if (!Number.isFinite(holeNumber) || !playerId || !Number.isFinite(grossScore) || grossScore <= 0) continue;
+    scoreEntryValues.set(scoreKey(holeNumber, playerId), String(grossScore));
+  }
+
+  manualJunkEvents.length = 0;
+  for (const junk of toRecordArray(snapshot.junkEvents)) {
+    const holeNumber = typeof junk.holeNumber === "number" ? junk.holeNumber : NaN;
+    const playerId = typeof junk.playerId === "string" ? junk.playerId : "";
+    const type = typeof junk.type === "string" ? junk.type : "";
+    if (!Number.isFinite(holeNumber) || !playerId || !type) continue;
+    manualJunkEvents.push({ holeNumber, playerId, type: type as JunkType });
+  }
+
+  manualClosestEvents.length = 0;
+  for (const event of toRecordArray(snapshot.closestEventsPar3)) {
+    const holeNumber = typeof event.holeNumber === "number" ? event.holeNumber : NaN;
+    const winnerPlayerId = typeof event.winnerPlayerId === "string" ? event.winnerPlayerId : null;
+    if (!Number.isFinite(holeNumber)) continue;
+    manualClosestEvents.push({ holeNumber, track: "par3", winnerPlayerId });
+  }
+  for (const event of toRecordArray(snapshot.closestEventsPar5)) {
+    const holeNumber = typeof event.holeNumber === "number" ? event.holeNumber : NaN;
+    const winnerPlayerId = typeof event.winnerPlayerId === "string" ? event.winnerPlayerId : null;
+    if (!Number.isFinite(holeNumber)) continue;
+    manualClosestEvents.push({ holeNumber, track: "par5", winnerPlayerId });
+  }
+
+  if (!applyRoundSetup()) {
+    throw new Error("Failed to apply saved round setup.");
+  }
+  renderSimulation();
+  setSaveStatus(`Loaded saved round ${snapshot.roundId}.`);
+}
+
+async function loadSelectedSavedRound(): Promise<void> {
+  if (!hasSupabaseEnv) {
+    setSavedRoundsStatus("Supabase env not configured for loading.", true);
+    return;
+  }
+  const roundId = savedRoundsSelect.value;
+  if (!roundId) {
+    setSavedRoundsStatus("Select a saved round first.", true);
+    return;
+  }
+  loadSavedRoundBtn.disabled = true;
+  setSavedRoundsStatus(`Loading saved round ${roundId}...`);
+  suppressAutoSave = true;
+  try {
+    const snapshot = await loadRoundSnapshot(roundId, runtimeEnv);
+    await applySavedRoundSnapshot(snapshot);
+    setSavedRoundsStatus(`Loaded saved round ${roundId}.`);
+  } catch (error) {
+    setSavedRoundsStatus(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    suppressAutoSave = false;
+    loadSavedRoundBtn.disabled = false;
+  }
 }
 
 function readSimulationControls(): SimulationControlsState | undefined {
@@ -342,14 +864,42 @@ function applyInitialSimulationControls(): void {
 
 function collectRoundSetupFromInputs(): RoundSetupState | null {
   const players: RoundSetupState["players"] = [
-    { id: "p1", name: player1NameInput.value.trim(), teamId: player1TeamSelect.value as SetupTeamId, strokesReceived: parseNonNegativeNumber(player1StrokesInput.value) ?? -1 },
-    { id: "p2", name: player2NameInput.value.trim(), teamId: player2TeamSelect.value as SetupTeamId, strokesReceived: parseNonNegativeNumber(player2StrokesInput.value) ?? -1 },
-    { id: "p3", name: player3NameInput.value.trim(), teamId: player3TeamSelect.value as SetupTeamId, strokesReceived: parseNonNegativeNumber(player3StrokesInput.value) ?? -1 },
-    { id: "p4", name: player4NameInput.value.trim(), teamId: player4TeamSelect.value as SetupTeamId, strokesReceived: parseNonNegativeNumber(player4StrokesInput.value) ?? -1 }
+    {
+      id: selectedPlayerDbIdsBySlot[0] ?? fallbackPlayerId(player1NameInput.value, 0),
+      fullName: player1NameInput.value.trim(),
+      displayName: player1DisplayInput.value.trim() || player1NameInput.value.trim(),
+      teamId: player1TeamSelect.value as SetupTeamId,
+      strokesReceived: parseNonNegativeNumber(player1StrokesInput.value) ?? -1
+    },
+    {
+      id: selectedPlayerDbIdsBySlot[1] ?? fallbackPlayerId(player2NameInput.value, 1),
+      fullName: player2NameInput.value.trim(),
+      displayName: player2DisplayInput.value.trim() || player2NameInput.value.trim(),
+      teamId: player2TeamSelect.value as SetupTeamId,
+      strokesReceived: parseNonNegativeNumber(player2StrokesInput.value) ?? -1
+    },
+    {
+      id: selectedPlayerDbIdsBySlot[2] ?? fallbackPlayerId(player3NameInput.value, 2),
+      fullName: player3NameInput.value.trim(),
+      displayName: player3DisplayInput.value.trim() || player3NameInput.value.trim(),
+      teamId: player3TeamSelect.value as SetupTeamId,
+      strokesReceived: parseNonNegativeNumber(player3StrokesInput.value) ?? -1
+    },
+    {
+      id: selectedPlayerDbIdsBySlot[3] ?? fallbackPlayerId(player4NameInput.value, 3),
+      fullName: player4NameInput.value.trim(),
+      displayName: player4DisplayInput.value.trim() || player4NameInput.value.trim(),
+      teamId: player4TeamSelect.value as SetupTeamId,
+      strokesReceived: parseNonNegativeNumber(player4StrokesInput.value) ?? -1
+    }
   ];
 
-  if (players.some((player) => player.name.length === 0)) {
+  if (players.some((player) => player.fullName.length === 0)) {
     setSetupStatus("Each player must have a name.", true);
+    return null;
+  }
+  if (players.some((player) => !hasFirstAndLastName(player.fullName))) {
+    setSetupStatus("Each player must have first and last name (e.g. Sam Janvey).", true);
     return null;
   }
   if (players.some((player) => player.teamId !== "teamA" && player.teamId !== "teamB")) {
@@ -386,10 +936,10 @@ function collectRoundSetupFromInputs(): RoundSetupState | null {
 
 function updateScoreEntryHeaders(): void {
   const players = roundSetup?.players;
-  scoreHeaderP1El.textContent = players?.[0]?.name || "Player 1";
-  scoreHeaderP2El.textContent = players?.[1]?.name || "Player 2";
-  scoreHeaderP3El.textContent = players?.[2]?.name || "Player 3";
-  scoreHeaderP4El.textContent = players?.[3]?.name || "Player 4";
+  scoreHeaderP1El.textContent = players?.[0]?.displayName || "Player 1";
+  scoreHeaderP2El.textContent = players?.[1]?.displayName || "Player 2";
+  scoreHeaderP3El.textContent = players?.[2]?.displayName || "Player 3";
+  scoreHeaderP4El.textContent = players?.[3]?.displayName || "Player 4";
 }
 
 function renderScoreEntryRows(): void {
@@ -450,7 +1000,7 @@ function populateJunkControls(): void {
   for (const player of roundSetup?.players ?? []) {
     const option = document.createElement("option");
     option.value = player.id;
-    option.textContent = player.name;
+    option.textContent = player.displayName;
     junkPlayerSelect.append(option);
   }
 }
@@ -469,7 +1019,7 @@ function renderJunkRows(): void {
   junkRowsEl.innerHTML = manualJunkEvents
     .map((event, idx) => {
       const player = playerById.get(event.playerId);
-      return `<tr><td>${event.holeNumber}</td><td>${escapeHtml(player?.name ?? event.playerId)}</td><td>${player?.teamId ?? "-"}</td><td>${event.type}</td><td><button type="button" data-junk-index="${idx}" class="secondary-btn">Remove</button></td></tr>`;
+      return `<tr><td>${event.holeNumber}</td><td>${escapeHtml(player?.displayName ?? event.playerId)}</td><td>${player?.teamId ?? "-"}</td><td>${event.type}</td><td><button type="button" data-junk-index="${idx}" class="secondary-btn">Remove</button></td></tr>`;
     })
     .join("");
 }
@@ -516,6 +1066,17 @@ function populateClosestHoleOptions(track: "par3" | "par5"): void {
 function populateClosestControls(): void {
   const track = (closestTrackSelect.value as "par3" | "par5") || "par3";
   populateClosestHoleOptions(track);
+  closestWinnerSelect.replaceChildren();
+  const carryOption = document.createElement("option");
+  carryOption.value = "carry";
+  carryOption.textContent = "No Winner (Carry)";
+  closestWinnerSelect.append(carryOption);
+  for (const player of roundSetup?.players ?? []) {
+    const option = document.createElement("option");
+    option.value = player.id;
+    option.textContent = `${player.displayName} (${player.teamId})`;
+    closestWinnerSelect.append(option);
+  }
 }
 
 function renderClosestRows(): void {
@@ -526,7 +1087,11 @@ function renderClosestRows(): void {
 
   closestRowsEl.innerHTML = manualClosestEvents
     .map((event, idx) => {
-      const resultLabel = event.winnerTeamId ? `${event.winnerTeamId} wins` : "Carry";
+      const playerName =
+        event.winnerPlayerId && roundSetup
+          ? (roundSetup.players.find((player) => player.id === event.winnerPlayerId)?.displayName ?? event.winnerPlayerId)
+          : null;
+      const resultLabel = playerName ? `${playerName} wins` : "Carry";
       return `<tr><td>${event.track.toUpperCase()}</td><td>${event.holeNumber}</td><td>${resultLabel}</td><td><button type="button" data-closest-index="${idx}" class="secondary-btn">Remove</button></td></tr>`;
     })
     .join("");
@@ -536,7 +1101,7 @@ function addManualClosestEvent(): void {
   const track = closestTrackSelect.value as "par3" | "par5";
   const holeNumber = Number(closestHoleSelect.value);
   const winnerRaw = closestWinnerSelect.value;
-  const winnerTeamId = winnerRaw === "carry" ? null : (winnerRaw as "teamA" | "teamB");
+  const winnerPlayerId = winnerRaw === "carry" ? null : winnerRaw;
 
   if ((track !== "par3" && track !== "par5") || !Number.isFinite(holeNumber) || holeNumber <= 0) {
     setClosestStatus("Choose a valid track and hole.", true);
@@ -556,10 +1121,12 @@ function addManualClosestEvent(): void {
     return;
   }
 
-  manualClosestEvents.push({ holeNumber, track, winnerTeamId });
+  manualClosestEvents.push({ holeNumber, track, winnerPlayerId });
   renderClosestRows();
   setClosestStatus(
-    winnerTeamId ? `Added ${track.toUpperCase()} hole ${holeNumber}: ${winnerTeamId} wins.` : `Added ${track.toUpperCase()} hole ${holeNumber}: carry.`
+    winnerPlayerId
+      ? `Added ${track.toUpperCase()} hole ${holeNumber}: ${closestWinnerSelect.selectedOptions[0]?.textContent ?? winnerPlayerId} wins.`
+      : `Added ${track.toUpperCase()} hole ${holeNumber}: carry.`
   );
   renderSimulation();
 }
@@ -578,10 +1145,10 @@ function applyRoundSetup(): boolean {
   setSetupStatus(
     `Setup applied: Team A (${nextSetup.players
       .filter((item) => item.teamId === "teamA")
-      .map((item) => item.name)
+      .map((item) => item.displayName)
       .join(", ")}) vs Team B (${nextSetup.players
       .filter((item) => item.teamId === "teamB")
-      .map((item) => item.name)
+      .map((item) => item.displayName)
       .join(", ")})${multiplierLabel}.`
   );
   return true;
@@ -743,7 +1310,9 @@ function renderSimulation(): void {
 
   const players = roundSetup.players.map((item) => ({
     id: item.id,
-    name: item.name,
+    name: item.displayName,
+    officialName: item.fullName,
+    displayName: item.displayName,
     defaultStrokesReceived: item.strokesReceived,
     lastUsedStrokesReceived: item.strokesReceived
   }));
@@ -784,14 +1353,14 @@ function renderSimulation(): void {
     .map((event) => ({
       roundId,
       holeNumber: event.holeNumber,
-      winnerTeamId: event.winnerTeamId
+      winnerPlayerId: event.winnerPlayerId
     }));
   const par5CarryoverEvents = manualClosestEvents
     .filter((event) => event.track === "par5")
     .map((event) => ({
       roundId,
       holeNumber: event.holeNumber,
-      winnerTeamId: event.winnerTeamId
+      winnerPlayerId: event.winnerPlayerId
     }));
 
   const completedHoleNumbers = currentCourse.holes
@@ -917,7 +1486,12 @@ function renderSimulation(): void {
       courseName: currentCourse.name,
       teeBoxId,
       seed,
-      settings: round.settings
+      settings: round.settings,
+      lifecycleStatus: round.status === "complete" ? "completed" : "in_progress",
+      roundSetup: {
+        points: { ...roundSetup.points },
+        doubleGame: roundSetup.doubleGame
+      }
     },
     players: round.players as unknown as Array<Record<string, unknown>>,
     teams: round.teams as unknown as Array<Record<string, unknown>>,
@@ -939,7 +1513,9 @@ function renderSimulation(): void {
   const junkPoints = ledger
     .filter((entry) => entry.type === "junk" || entry.type === "hole_in_one")
     .reduce((sum, entry) => sum + entry.points, 0);
-  const cpPoints = ledger.filter((entry) => entry.type === "closest_par3").reduce((sum, entry) => sum + entry.points, 0);
+  const cpPoints = ledger
+    .filter((entry) => entry.type === "closest_par3" || entry.type === "par5_carryover")
+    .reduce((sum, entry) => sum + entry.points, 0);
   const pressPoints = ledger.filter((entry) => entry.type === "press_win").reduce((sum, entry) => sum + entry.points, 0);
   const strokesByPlayer = new Map(round.roundPlayers.map((item) => [item.playerId, item.strokesReceived]));
   summaryEl.innerHTML = `
@@ -1021,29 +1597,16 @@ function renderSimulation(): void {
       </div>
     </div>
   `;
+
+  queueAutoSave();
 }
 
 simulateBtn.addEventListener("click", renderSimulation);
 saveRoundBtn.addEventListener("click", async () => {
-  if (!latestRoundSnapshot) {
-    setSaveStatus("Run simulation or enter scores first so there is a round to save.", true);
-    return;
-  }
-  saveRoundBtn.disabled = true;
-  setSaveStatus("Saving round to Supabase (snapshot + normalized tables)...");
-  try {
-    const runtimeEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
-    await saveRoundSnapshot(
-      latestRoundSnapshot,
-      runtimeEnv
-    );
-    await saveRoundNormalized(latestRoundSnapshot, runtimeEnv);
-    setSaveStatus(`Saved round ${latestRoundSnapshot.roundId} to Supabase (snapshot + normalized records).`);
-  } catch (error) {
-    setSaveStatus(error instanceof Error ? error.message : String(error), true);
-  } finally {
-    saveRoundBtn.disabled = false;
-  }
+  await saveRoundManually();
+});
+abandonRoundBtn.addEventListener("click", () => {
+  void markRoundAbandoned();
 });
 applySetupBtn.addEventListener("click", () => {
   if (applyRoundSetup()) {
@@ -1053,6 +1616,21 @@ applySetupBtn.addEventListener("click", () => {
 seedInput.addEventListener("input", persistSimulationControls);
 handicapInput.addEventListener("input", persistSimulationControls);
 teeBoxSelect.addEventListener("change", persistSimulationControls);
+searchPlayerBtn.addEventListener("click", () => {
+  void runPlayerSearch(playerQueryInput.value);
+});
+playerQueryInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void runPlayerSearch(playerQueryInput.value);
+  }
+});
+playerResultsSelect.addEventListener("change", () => {
+  setControlsBusy(controlsBusy);
+});
+assignPlayerBtn.addEventListener("click", () => {
+  assignSelectedPlayerToSlot();
+});
 searchCourseBtn.addEventListener("click", () => {
   void runCourseSearch(courseQueryInput.value);
 });
@@ -1071,6 +1649,16 @@ recentCoursesSelect.addEventListener("change", () => {
 loadRecentBtn.addEventListener("click", () => {
   void loadRecentCourse();
 });
+refreshSavedRoundsBtn.addEventListener("click", () => {
+  void refreshSavedRounds();
+  void refreshSeasonLeaderboard();
+});
+savedRoundsSelect.addEventListener("change", () => {
+  setControlsBusy(controlsBusy);
+});
+loadSavedRoundBtn.addEventListener("click", () => {
+  void loadSelectedSavedRound();
+});
 addJunkBtn.addEventListener("click", () => {
   addManualJunkEvent();
 });
@@ -1086,7 +1674,7 @@ junkRowsEl.addEventListener("click", (event) => {
   renderSimulation();
 });
 closestTrackSelect.addEventListener("change", () => {
-  populateClosestHoleOptions(closestTrackSelect.value as "par3" | "par5");
+  populateClosestControls();
 });
 addClosestBtn.addEventListener("click", () => {
   addManualClosestEvent();
@@ -1137,6 +1725,8 @@ populateJunkControls();
 renderJunkRows();
 populateClosestControls();
 renderClosestRows();
+populatePlayerResults();
+populateSavedRounds();
 setControlsBusy(false);
 
 if (providerSource === "golfcourseapi") {
@@ -1148,3 +1738,5 @@ if (providerSource === "golfcourseapi") {
 }
 
 renderSimulation();
+void refreshSavedRounds();
+void refreshSeasonLeaderboard();

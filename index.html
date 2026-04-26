@@ -35,6 +35,29 @@
       </section>
 
       <section class="controls">
+        <label class="control-wide">
+          Player Search
+          <input id="playerQuery" type="text" placeholder="e.g. Sam Janvey" />
+        </label>
+        <button id="searchPlayerBtn" type="button">Search Players</button>
+        <label class="control-wide">
+          Player Results
+          <select id="playerResults"></select>
+        </label>
+        <label>
+          Assign To
+          <select id="assignPlayerSlot">
+            <option value="0">Player 1</option>
+            <option value="1">Player 2</option>
+            <option value="2">Player 3</option>
+            <option value="3">Player 4</option>
+          </select>
+        </label>
+        <button id="assignPlayerBtn" type="button">Assign Player</button>
+        <div class="control-status" id="playerStatus"></div>
+      </section>
+
+      <section class="controls">
         <label>
           Seed
           <input id="seed" type="number" value="42" />
@@ -49,7 +72,15 @@
         </label>
         <button id="simulateBtn" type="button">Run Simulation</button>
         <button id="saveRoundBtn" type="button">Save Round to Supabase</button>
+        <button id="abandonRoundBtn" class="secondary-btn" type="button">Mark Round Abandoned</button>
+        <label class="control-wide">
+          Saved Rounds
+          <select id="savedRounds"></select>
+        </label>
+        <button id="refreshSavedRoundsBtn" class="secondary-btn" type="button">Refresh Saved Rounds</button>
+        <button id="loadSavedRoundBtn" type="button">Load Saved Round</button>
         <div class="control-status" id="saveStatus"></div>
+        <div class="control-status" id="savedRoundsStatus"></div>
       </section>
 
       <section class="panel">
@@ -60,7 +91,11 @@
             <div class="setup-player-row">
               <label>
                 Player 1 Name
-                <input id="player1Name" type="text" value="SJ" />
+                <input id="player1Name" type="text" value="Sam Janvey" />
+              </label>
+              <label>
+                Display
+                <input id="player1Display" type="text" value="SJ" placeholder="Optional (e.g. SJ)" />
               </label>
               <label>
                 Team
@@ -77,7 +112,11 @@
             <div class="setup-player-row">
               <label>
                 Player 2 Name
-                <input id="player2Name" type="text" value="CK" />
+                <input id="player2Name" type="text" value="Chris Klein" />
+              </label>
+              <label>
+                Display
+                <input id="player2Display" type="text" value="CK" placeholder="Optional (e.g. CK)" />
               </label>
               <label>
                 Team
@@ -94,7 +133,11 @@
             <div class="setup-player-row">
               <label>
                 Player 3 Name
-                <input id="player3Name" type="text" value="RR" />
+                <input id="player3Name" type="text" value="Rob Rivera" />
+              </label>
+              <label>
+                Display
+                <input id="player3Display" type="text" value="RR" placeholder="Optional (e.g. RR)" />
               </label>
               <label>
                 Team
@@ -111,7 +154,11 @@
             <div class="setup-player-row">
               <label>
                 Player 4 Name
-                <input id="player4Name" type="text" value="TK" />
+                <input id="player4Name" type="text" value="Tom Knight" />
+              </label>
+              <label>
+                Display
+                <input id="player4Display" type="text" value="TK" placeholder="Optional (e.g. TK)" />
               </label>
               <label>
                 Team
@@ -232,8 +279,6 @@
           <label>
             Result
             <select id="closestWinner">
-              <option value="teamA">Team A Wins</option>
-              <option value="teamB">Team B Wins</option>
               <option value="carry">No Winner (Carry)</option>
             </select>
           </label>
@@ -250,6 +295,21 @@
             </tr>
           </thead>
           <tbody id="closestRows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Season Junk Leaderboard</h2>
+        <div class="control-status" id="seasonLeaderboardStatus"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Player</th>
+              <th>Junk Points</th>
+            </tr>
+          </thead>
+          <tbody id="seasonLeaderboardRows"></tbody>
         </table>
       </section>
 

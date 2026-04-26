@@ -110,13 +110,13 @@ export interface JunkEvent {
 export interface ClosestEvent {
   roundId: string;
   holeNumber: number;
-  winnerTeamId: string | null;
+  winnerPlayerId: string | null;
 }
 
 export interface Par5CarryoverEvent {
   roundId: string;
   holeNumber: number;
-  winnerTeamId: string | null;
+  winnerPlayerId: string | null;
 }
 
 export interface CarryoverState {

@@ -240,9 +240,15 @@ describe("nassau scenarios", () => {
     const result = evaluateClosestCarryovers({
       roundId: "r1",
       courseHoles: buildCourseHoles(),
+      teamIdByPlayerId: new Map([
+        ["p1", "teamA"],
+        ["p2", "teamA"],
+        ["p3", "teamB"],
+        ["p4", "teamB"]
+      ]),
       closestEvents: [
-        { roundId: "r1", holeNumber: 3, winnerTeamId: null },
-        { roundId: "r1", holeNumber: 7, winnerTeamId: "teamA" }
+        { roundId: "r1", holeNumber: 3, winnerPlayerId: null },
+        { roundId: "r1", holeNumber: 7, winnerPlayerId: "p1" }
       ],
       par5CarryoverEvents: []
     });
@@ -255,10 +261,16 @@ describe("nassau scenarios", () => {
     const result = evaluateClosestCarryovers({
       roundId: "r1",
       courseHoles: buildCourseHoles(),
-      closestEvents: [{ roundId: "r1", holeNumber: 3, winnerTeamId: null }],
+      teamIdByPlayerId: new Map([
+        ["p1", "teamA"],
+        ["p2", "teamA"],
+        ["p3", "teamB"],
+        ["p4", "teamB"]
+      ]),
+      closestEvents: [{ roundId: "r1", holeNumber: 3, winnerPlayerId: null }],
       par5CarryoverEvents: [
-        { roundId: "r1", holeNumber: 5, winnerTeamId: null },
-        { roundId: "r1", holeNumber: 9, winnerTeamId: "teamB" }
+        { roundId: "r1", holeNumber: 5, winnerPlayerId: null },
+        { roundId: "r1", holeNumber: 9, winnerPlayerId: "p3" }
       ]
     });
     const par5 = result.entries.find((entry) => entry.type === "par5_carryover");
