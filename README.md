@@ -78,3 +78,21 @@ The seed script upserts these Old Westbury Golf & Country Club course IDs:
 - `7316` (Bluegrass/Overlook)
 - `7339` (Woods/Bluegrass)
 - `7626` (Overlook/Woods)
+
+## Next Up (Prioritized)
+
+- [x] Wire course provider into live app flow with runtime provider selection (GolfCourseAPI vs mock)
+- [x] Add saved/recent course history in UI so users can reload quickly
+- [x] Add provider-level retry/timeouts and user-friendly API error categories
+- [x] Add integration tests for the web course search/load flow
+
+## Live Course UI Setup
+
+- For local UI live course search/load, set either:
+  - `VITE_GOLFCOURSEAPI_KEY` (standard Vite style), or
+  - `GOLFCOURSEAPI_KEY` (now supported directly)
+- Optional base URL override:
+  - `VITE_GOLFCOURSEAPI_BASE_URL` or `GOLFCOURSEAPI_BASE_URL`
+  - defaults to `https://api.golfcourseapi.com`
+- Start the app:
+  - `npm run web -- --host 127.0.0.1 --port 5174`

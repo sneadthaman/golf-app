@@ -8,6 +8,14 @@ function okResponse(payload: unknown): Response {
   });
 }
 
+function errorResponse(status: number, statusText: string): Response {
+  return new Response(JSON.stringify({ error: statusText }), {
+    status,
+    statusText,
+    headers: { "content-type": "application/json" }
+  });
+}
+
 describe("GolfCourseApiProvider", () => {
   test("searchCourses uses auth header and maps display names", async () => {
     const calls: Array<{ input: string; auth?: string }> = [];
@@ -17,14 +25,21 @@ describe("GolfCourseApiProvider", () => {
         auth: (init?.headers as Record<string, string> | undefined)?.Authorization
       });
       return okResponse({
-        courses: [{ id: 10, club_name: "Old Westbury Golf & Country Club", course_name: "Main Course" }]
+        courses: [
+          {
+            id: 10,
+            club_name: "Old Westbury Golf & Country Club",
+            course_name: "Main Course",
+            location: { state: "New York" }
+          }
+        ]
       });
     };
     const provider = new GolfCourseApiProvider({ apiKey: "abc123", fetchFn });
     const results = await provider.searchCourses("old westbury");
     expect(calls[0].input).toContain("/v1/search?search_query=old%20westbury");
     expect(calls[0].auth).toBe("Key abc123");
-    expect(results).toEqual([{ id: "10", name: "Old Westbury Golf & Country Club - Main Course" }]);
+    expect(results).toEqual([{ id: "10", name: "Old Westbury Golf & Country Club - Main Course", state: "NY" }]);
   });
 
   test("getCourse normalizes tees and holes into internal Course shape", async () => {
@@ -109,5 +124,57 @@ describe("GolfCourseApiProvider", () => {
     expect(course.holes[8].handicapIndex).toBe(9);
     expect(course.holes[9].handicapIndex).toBe(1);
     expect(course.holes[17].handicapIndex).toBe(9);
+  });
+
+  test("search retries on transient server error", async () => {
+    let calls = 0;
+    const fetchFn = async () => {
+      calls += 1;
+      if (calls === 1) return errorResponse(502, "Bad Gateway");
+      return okResponse({
+        courses: [{ id: 11, club_name: "Example Club", course_name: "South", location: { state: "CA" } }]
+      });
+    };
+
+    const provider = new GolfCourseApiProvider({
+      apiKey: "key",
+      fetchFn,
+      maxRetries: 1,
+      retryBaseDelayMs: 0
+    });
+    const results = await provider.searchCourses("example");
+    expect(calls).toBe(2);
+    expect(results).toEqual([{ id: "11", name: "Example Club - South", state: "CA" }]);
+  });
+
+  test("search surfaces auth error without retrying", async () => {
+    let calls = 0;
+    const fetchFn = async () => {
+      calls += 1;
+      return errorResponse(401, "Unauthorized");
+    };
+    const provider = new GolfCourseApiProvider({ apiKey: "bad-key", fetchFn, maxRetries: 3 });
+    await expect(provider.searchCourses("example")).rejects.toThrow("authentication failed");
+    expect(calls).toBe(1);
+  });
+
+  test("search surfaces timeout error", async () => {
+    const fetchFn = (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const abortError = new Error("aborted");
+          abortError.name = "AbortError";
+          reject(abortError);
+        });
+      });
+
+    const provider = new GolfCourseApiProvider({
+      apiKey: "key",
+      fetchFn,
+      timeoutMs: 5,
+      maxRetries: 0
+    });
+
+    await expect(provider.searchCourses("slow")).rejects.toThrow("timed out");
   });
 });

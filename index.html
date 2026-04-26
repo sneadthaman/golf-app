@@ -14,6 +14,26 @@
       </header>
 
       <section class="controls">
+        <label class="control-wide">
+          Course Search
+          <input id="courseQuery" type="text" placeholder="e.g. Old Westbury" />
+        </label>
+        <button id="searchCourseBtn" type="button">Search Courses</button>
+        <label class="control-wide">
+          Search Results
+          <select id="courseResults"></select>
+        </label>
+        <button id="loadCourseBtn" type="button">Load Selected Course</button>
+        <label class="control-wide">
+          Recent Courses
+          <select id="recentCourses"></select>
+        </label>
+        <button id="loadRecentBtn" type="button">Load Recent</button>
+        <button id="clearRecentBtn" class="secondary-btn" type="button">Clear Recent</button>
+        <div class="control-status" id="courseStatus"></div>
+      </section>
+
+      <section class="controls">
         <label>
           Seed
           <input id="seed" type="number" value="42" />

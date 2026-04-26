@@ -3,6 +3,7 @@ import { Course } from "../types";
 export interface CourseSearchResult {
   id: string;
   name: string;
+  state?: string;
 }
 
 export interface CourseProvider {

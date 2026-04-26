@@ -47,6 +47,21 @@ body {
   font-size: 14px;
 }
 
+.control-wide {
+  min-width: 260px;
+}
+
+.control-status {
+  min-height: 20px;
+  font-size: 13px;
+  color: #2e4b52;
+  flex: 1 1 100%;
+}
+
+.control-status.error {
+  color: #9f2e2e;
+}
+
 .controls input,
 .controls select {
   min-width: 150px;
@@ -62,6 +77,10 @@ body {
   background: #1f7a43;
   color: white;
   cursor: pointer;
+}
+
+.controls .secondary-btn {
+  background: #5f7078;
 }
 
 .summary {
