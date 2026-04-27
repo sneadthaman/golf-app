@@ -14,6 +14,7 @@ import {
 import { CourseFlowController, formatCourseLabel } from "./courseFlow";
 import {
   PlayerSearchResult,
+  ROUND_STATE_SCHEMA_VERSION,
   RoundSnapshotPayload,
   SeasonJunkLeaderRow,
   SavedRoundSummary,
@@ -46,6 +47,10 @@ const holeRowsEl = document.querySelector<HTMLElement>("#holeRows");
 const courseRowsEl = document.querySelector<HTMLElement>("#courseRows");
 const ledgerRowsEl = document.querySelector<HTMLElement>("#ledgerRows");
 const settlementEl = document.querySelector<HTMLElement>("#settlement");
+const copySettlementBtn = document.querySelector<HTMLButtonElement>("#copySettlementBtn");
+const exportSettlementTextBtn = document.querySelector<HTMLButtonElement>("#exportSettlementTextBtn");
+const settlementStatusEl = document.querySelector<HTMLElement>("#settlementStatus");
+const settlementMessageEl = document.querySelector<HTMLTextAreaElement>("#settlementMessage");
 const courseQueryInput = document.querySelector<HTMLInputElement>("#courseQuery");
 const searchCourseBtn = document.querySelector<HTMLButtonElement>("#searchCourseBtn");
 const courseResultsSelect = document.querySelector<HTMLSelectElement>("#courseResults");
@@ -122,6 +127,10 @@ if (
   !courseRowsEl ||
   !ledgerRowsEl ||
   !settlementEl ||
+  !copySettlementBtn ||
+  !exportSettlementTextBtn ||
+  !settlementStatusEl ||
+  !settlementMessageEl ||
   !courseQueryInput ||
   !searchCourseBtn ||
   !courseResultsSelect ||
@@ -181,6 +190,12 @@ if (
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
 const runtimeEnv = env ?? {};
+const currentRoundUserId =
+  runtimeEnv.VITE_ROUND_USER_ID?.trim() ||
+  runtimeEnv.ROUND_USER_ID?.trim() ||
+  runtimeEnv.VITE_USER_ID?.trim() ||
+  runtimeEnv.USER_ID?.trim() ||
+  "local-device";
 const hasSupabaseEnv = Boolean(
   (runtimeEnv.VITE_SUPABASE_URL ?? runtimeEnv.SUPABASE_URL) &&
     (runtimeEnv.VITE_SUPABASE_SERVICE_ROLE_KEY ??
@@ -260,6 +275,11 @@ let autoSaveTimeoutHandle: number | undefined;
 let autoSaveInFlight = false;
 let autoSaveQueued = false;
 let suppressAutoSave = false;
+let latestSettlementSummaryText = "";
+let latestSettlementMessageText = "";
+
+copySettlementBtn.disabled = true;
+exportSettlementTextBtn.disabled = true;
 
 function setCourseStatus(message: string, isError = false): void {
   courseStatusEl.textContent = message;
@@ -299,6 +319,11 @@ function setSavedRoundsStatus(message: string, isError = false): void {
 function setSeasonLeaderboardStatus(message: string, isError = false): void {
   seasonLeaderboardStatusEl.textContent = message;
   seasonLeaderboardStatusEl.classList.toggle("error", isError);
+}
+
+function setSettlementStatus(message: string, isError = false): void {
+  settlementStatusEl.textContent = message;
+  settlementStatusEl.classList.toggle("error", isError);
 }
 
 function setControlsBusy(isBusy: boolean): void {
@@ -403,6 +428,125 @@ function formatSavedRoundLabel(item: SavedRoundSummary): string {
   const statusLabel =
     item.status === "completed" ? "completed" : item.status === "abandoned" ? "abandoned" : "in-progress";
   return `${updatedLabel} | ${item.courseName} | ${playersLabel} | ${item.holesCompleted} holes | ${statusLabel}`;
+}
+
+function formatTeamOutcome(pointsDelta: number): string {
+  if (pointsDelta > 0) return `wins ${pointsDelta} point${pointsDelta === 1 ? "" : "s"}`;
+  if (pointsDelta < 0) {
+    const owed = Math.abs(pointsDelta);
+    return `owes ${owed} point${owed === 1 ? "" : "s"}`;
+  }
+  return "pushes (0 points)";
+}
+
+function formatSettlementSummary(
+  round: Round,
+  ledger: Array<{ type: string; playerId?: string; points: number; holeNumber?: number; description: string }>,
+  settlement: { byTeam: Record<string, number> }
+): { html: string; summaryText: string; messageText: string } {
+  const teamA = round.teams[0] ?? { id: "teamA", name: "Team A", playerIds: [] };
+  const teamB = round.teams[1] ?? { id: "teamB", name: "Team B", playerIds: [] };
+  const scoreA = settlement.byTeam[teamA.id] ?? 0;
+  const scoreB = settlement.byTeam[teamB.id] ?? 0;
+  const deltaA = scoreA - scoreB;
+  const deltaB = -deltaA;
+
+  const playerNameById = new Map(round.players.map((player) => [player.id, player.name]));
+  const junkTotals = new Map<string, number>();
+  for (const entry of ledger) {
+    if ((entry.type === "junk" || entry.type === "hole_in_one") && entry.playerId) {
+      junkTotals.set(entry.playerId, (junkTotals.get(entry.playerId) ?? 0) + entry.points);
+    }
+  }
+  const junkRows = [...junkTotals.entries()]
+    .map(([playerId, points]) => ({ playerName: playerNameById.get(playerId) ?? playerId, points }))
+    .sort((a, b) => b.points - a.points || a.playerName.localeCompare(b.playerName));
+
+  const cpTotals = new Map<string, { points: number; wins: number }>();
+  for (const entry of ledger) {
+    if ((entry.type === "closest_par3" || entry.type === "par5_carryover") && entry.playerId) {
+      const current = cpTotals.get(entry.playerId) ?? { points: 0, wins: 0 };
+      cpTotals.set(entry.playerId, { points: current.points + entry.points, wins: current.wins + 1 });
+    }
+  }
+  const cpRows = [...cpTotals.entries()]
+    .map(([playerId, totals]) => ({
+      playerName: playerNameById.get(playerId) ?? playerId,
+      points: totals.points,
+      wins: totals.wins
+    }))
+    .sort((a, b) => b.points - a.points || a.playerName.localeCompare(b.playerName));
+
+  const pressRows = ledger
+    .filter((entry) => entry.type === "press_win")
+    .map((entry) => `Hole ${entry.holeNumber ?? "-"}: ${entry.description} (+${entry.points})`);
+  const activePressCount = (round.presses ?? []).filter((press) => press.status === "active").length;
+
+  const junkHtml = junkRows.length
+    ? `<ul>${junkRows.map((row) => `<li>${escapeHtml(row.playerName)}: +${row.points}</li>`).join("")}</ul>`
+    : `<p>No junk points yet.</p>`;
+  const cpHtml = cpRows.length
+    ? `<ul>${cpRows
+        .map((row) => `<li>${escapeHtml(row.playerName)}: +${row.points} (${row.wins} win${row.wins === 1 ? "" : "s"})</li>`)
+        .join("")}</ul>`
+    : `<p>No CP winners yet.</p>`;
+  const pressDetailsHtml = pressRows.length
+    ? `<ul>${pressRows.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`
+    : `<p>No settled press wins yet.</p>`;
+
+  const html = `
+    <div class="settlement-grid">
+      <div>
+        <h3>Team Settlement</h3>
+        <ul>
+          <li><strong>${escapeHtml(teamA.name)}</strong> ${formatTeamOutcome(deltaA)}</li>
+          <li><strong>${escapeHtml(teamB.name)}</strong> ${formatTeamOutcome(deltaB)}</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Player Junk Totals</h3>
+        ${junkHtml}
+      </div>
+      <div>
+        <h3>CP Winners</h3>
+        ${cpHtml}
+      </div>
+      <div>
+        <details>
+          <summary>Press Results (${pressRows.length} settled${activePressCount ? `, ${activePressCount} active` : ""})</summary>
+          ${pressDetailsHtml}
+        </details>
+      </div>
+    </div>
+  `;
+
+  const junkText = junkRows.length
+    ? junkRows.map((row) => `${row.playerName}: +${row.points}`).join("; ")
+    : "None";
+  const cpText = cpRows.length
+    ? cpRows.map((row) => `${row.playerName}: +${row.points} (${row.wins} wins)`).join("; ")
+    : "None";
+  const pressText = pressRows.length ? pressRows.join(" | ") : "None";
+
+  const summaryText = [
+    `Settlement Summary (${round.id})`,
+    `${teamA.name}: ${formatTeamOutcome(deltaA)}`,
+    `${teamB.name}: ${formatTeamOutcome(deltaB)}`,
+    `Player junk totals: ${junkText}`,
+    `CP winners: ${cpText}`,
+    `Press results: ${pressText}`
+  ].join("\n");
+
+  const messageText = [
+    `Round ${round.id} settlement:`,
+    `${teamA.name} ${formatTeamOutcome(deltaA)}.`,
+    `${teamB.name} ${formatTeamOutcome(deltaB)}.`,
+    `Junk: ${junkText}.`,
+    `CP: ${cpText}.`,
+    `Presses: ${pressText}.`
+  ].join(" ");
+
+  return { html, summaryText, messageText };
 }
 
 function fallbackPlayerId(_name: string, slotIndex: number): string {
@@ -514,6 +658,52 @@ function populateSavedRounds(): void {
     savedRoundsSelect.append(option);
   }
   loadSavedRoundBtn.disabled = false;
+}
+
+async function copyOrShareSettlementSummary(): Promise<void> {
+  if (!latestSettlementSummaryText) {
+    setSettlementStatus("Run a simulation first to generate a settlement summary.", true);
+    return;
+  }
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: "Golf Settlement Summary",
+        text: latestSettlementSummaryText
+      });
+      setSettlementStatus("Shared settlement summary.");
+      return;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setSettlementStatus("Share canceled.");
+        return;
+      }
+    }
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(latestSettlementSummaryText);
+    setSettlementStatus("Copied settlement summary.");
+    return;
+  }
+  setSettlementStatus("Clipboard unavailable in this browser.", true);
+}
+
+function exportSettlementTextMessage(): void {
+  if (!latestSettlementMessageText) {
+    setSettlementStatus("Run a simulation first to export a text message.", true);
+    return;
+  }
+  const fileName = `settlement-${latestRoundSnapshot?.roundId ?? "round"}.txt`;
+  const blob = new Blob([latestSettlementMessageText], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  setSettlementStatus(`Exported ${fileName}.`);
 }
 
 async function persistCurrentRound(mode: "manual" | "auto"): Promise<void> {
@@ -1482,12 +1672,43 @@ function renderSimulation(): void {
     roundId: round.id,
     status: round.status,
     roundMetadata: {
+      schemaVersion: ROUND_STATE_SCHEMA_VERSION,
       courseId: currentCourse.id,
       courseName: currentCourse.name,
       teeBoxId,
+      course: {
+        id: currentCourse.id,
+        name: currentCourse.name,
+        teeBoxId,
+        teeBoxName: teeBox?.name ?? teeBoxId,
+        holes: currentCourse.holes.map((hole) => ({
+          holeNumber: hole.holeNumber,
+          par: hole.par,
+          handicapIndex: hole.handicapIndex,
+          yardageByTeeBox: hole.yardageByTeeBox
+        }))
+      },
       seed,
       settings: round.settings,
+      bettingConfig: {
+        points: { ...roundSetup.points },
+        pointMultiplier,
+        appliedPoints: {
+          front: round.settings.frontValuePoints,
+          back: round.settings.backValuePoints,
+          overall: round.settings.overallValuePoints,
+          press: round.settings.pressValuePoints
+        },
+        autoPressEnabled: round.settings.autoPressEnabled,
+        junkEnabled: round.settings.junkEnabled,
+        crazyMode: round.settings.crazyMode
+      },
       lifecycleStatus: round.status === "complete" ? "completed" : "in_progress",
+      ownership: {
+        ownerId: currentRoundUserId,
+        editorIds: [],
+        viewerIds: []
+      },
       roundSetup: {
         points: { ...roundSetup.points },
         doubleGame: roundSetup.doubleGame
@@ -1579,29 +1800,25 @@ function renderSimulation(): void {
         .join("")
     : `<tr><td colspan="5">No ledger entries yet. Enter scores hole-by-hole to build running results.</td></tr>`;
 
-  const byTeamHtml = Object.entries(settlement.byTeam)
-    .map(([teamId, points]) => `<li>${teamId}: ${points}</li>`)
-    .join("");
-  const byPlayerHtml = Object.entries(settlement.byPlayer)
-    .map(([playerId, points]) => `<li>${playerId}: ${points}</li>`)
-    .join("");
-  settlementEl.innerHTML = `
-    <div class="settlement-grid">
-      <div>
-        <h3>By Team</h3>
-        <ul>${byTeamHtml}</ul>
-      </div>
-      <div>
-        <h3>By Player</h3>
-        <ul>${byPlayerHtml}</ul>
-      </div>
-    </div>
-  `;
+  const settlementView = formatSettlementSummary(round, ledger, settlement);
+  latestSettlementSummaryText = settlementView.summaryText;
+  latestSettlementMessageText = settlementView.messageText;
+  settlementEl.innerHTML = settlementView.html;
+  settlementMessageEl.value = settlementView.messageText;
+  copySettlementBtn.disabled = false;
+  exportSettlementTextBtn.disabled = false;
+  setSettlementStatus("");
 
   queueAutoSave();
 }
 
 simulateBtn.addEventListener("click", renderSimulation);
+copySettlementBtn.addEventListener("click", () => {
+  void copyOrShareSettlementSummary();
+});
+exportSettlementTextBtn.addEventListener("click", () => {
+  exportSettlementTextMessage();
+});
 saveRoundBtn.addEventListener("click", async () => {
   await saveRoundManually();
 });

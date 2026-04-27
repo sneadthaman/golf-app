@@ -365,6 +365,20 @@
 
       <section class="panel">
         <h2>Settlement</h2>
+        <div class="settlement-actions">
+          <button id="copySettlementBtn" type="button">Copy/Share Settlement Summary</button>
+          <button id="exportSettlementTextBtn" class="secondary-btn" type="button">Export Text Message Format</button>
+          <div class="control-status" id="settlementStatus"></div>
+          <label class="settlement-message-wrap" for="settlementMessage">
+            Text Message Preview
+            <textarea
+              id="settlementMessage"
+              readonly
+              rows="6"
+              placeholder="Settlement text message preview appears here."
+            ></textarea>
+          </label>
+        </div>
         <div id="settlement"></div>
       </section>
     </main>

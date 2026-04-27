@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
+export const ROUND_STATE_SCHEMA_VERSION = 1;
+const DEFAULT_ROUND_USER_ID = "local-device";
+
 export interface RoundSnapshotPayload {
   roundId: string;
   status: "active" | "complete";
@@ -115,8 +118,141 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isRecordArray(value: unknown): Array<Record<string, unknown>> {
+function isRecordArray(value: unknown): value is Array<Record<string, unknown>> {
   return Array.isArray(value) && value.every((item) => typeof item === "object" && item !== null);
+}
+
+function normalizeRoundMetadata(value: unknown): Record<string, unknown> {
+  const metadata = isObject(value) ? { ...value } : {};
+  const rawSchemaVersion = metadata.schemaVersion;
+  const schemaVersion =
+    typeof rawSchemaVersion === "number" && Number.isInteger(rawSchemaVersion) && rawSchemaVersion >= 1
+      ? rawSchemaVersion
+      : ROUND_STATE_SCHEMA_VERSION;
+  return {
+    ...metadata,
+    schemaVersion
+  };
+}
+
+interface RoundOwnership {
+  ownerId: string | null;
+  editorIds: string[];
+  viewerIds: string[];
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string" && item.trim().length > 0))];
+}
+
+function resolveCurrentRoundUserId(env: Record<string, string | undefined>): string {
+  return (
+    env.VITE_ROUND_USER_ID?.trim() ||
+    env.ROUND_USER_ID?.trim() ||
+    env.VITE_USER_ID?.trim() ||
+    env.USER_ID?.trim() ||
+    DEFAULT_ROUND_USER_ID
+  );
+}
+
+function getRoundOwnership(metadata: Record<string, unknown>): RoundOwnership {
+  const ownershipRaw = isObject(metadata.ownership) ? metadata.ownership : {};
+  const ownerId =
+    typeof ownershipRaw.ownerId === "string" && ownershipRaw.ownerId.trim().length > 0
+      ? ownershipRaw.ownerId.trim()
+      : null;
+  const editorIds = toStringArray(ownershipRaw.editorIds).filter((id) => id !== ownerId);
+  const viewerIds = toStringArray(ownershipRaw.viewerIds).filter((id) => id !== ownerId && !editorIds.includes(id));
+  return { ownerId, editorIds, viewerIds };
+}
+
+function withRoundOwnership(
+  metadata: Record<string, unknown>,
+  currentUserId: string,
+  forcedOwnerId?: string
+): Record<string, unknown> {
+  const ownership = getRoundOwnership(metadata);
+  const ownerId = forcedOwnerId ?? ownership.ownerId ?? currentUserId;
+  return {
+    ...metadata,
+    ownership: {
+      ownerId,
+      editorIds: ownership.editorIds.filter((id) => id !== ownerId),
+      viewerIds: ownership.viewerIds.filter((id) => id !== ownerId)
+    }
+  };
+}
+
+function canViewRound(metadata: Record<string, unknown>, currentUserId: string): boolean {
+  const ownership = getRoundOwnership(metadata);
+  if (!ownership.ownerId) return true;
+  return (
+    currentUserId === ownership.ownerId ||
+    ownership.editorIds.includes(currentUserId) ||
+    ownership.viewerIds.includes(currentUserId)
+  );
+}
+
+function canEditRound(metadata: Record<string, unknown>, currentUserId: string): boolean {
+  const ownership = getRoundOwnership(metadata);
+  if (!ownership.ownerId) return true;
+  return currentUserId === ownership.ownerId || ownership.editorIds.includes(currentUserId);
+}
+
+function isMissingRowError(error: unknown): boolean {
+  if (!isObject(error)) return false;
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  const code = typeof error.code === "string" ? error.code : "";
+  return code === "PGRST116" || message.includes("not found") || message.includes("0 rows");
+}
+
+export function normalizeRoundSnapshotPayload(payload: RoundSnapshotPayload): RoundSnapshotPayload {
+  return {
+    roundId: typeof payload.roundId === "string" ? payload.roundId : "",
+    status: payload.status === "complete" ? "complete" : "active",
+    roundMetadata: normalizeRoundMetadata(payload.roundMetadata),
+    players: isRecordArray(payload.players) ? payload.players : [],
+    teams: isRecordArray(payload.teams) ? payload.teams : [],
+    holeScores: isRecordArray(payload.holeScores) ? payload.holeScores : [],
+    junkEvents: isRecordArray(payload.junkEvents) ? payload.junkEvents : [],
+    closestEventsPar3: isRecordArray(payload.closestEventsPar3) ? payload.closestEventsPar3 : [],
+    closestEventsPar5: isRecordArray(payload.closestEventsPar5) ? payload.closestEventsPar5 : [],
+    presses: isRecordArray(payload.presses) ? payload.presses : [],
+    finalLedger: isRecordArray(payload.finalLedger) ? payload.finalLedger : []
+  };
+}
+
+export function validateRoundSnapshotPayload(payload: RoundSnapshotPayload): void {
+  if (!payload.roundId.trim()) {
+    throw new Error("Round snapshot must include a non-empty roundId.");
+  }
+  if (payload.status !== "active" && payload.status !== "complete") {
+    throw new Error(`Round snapshot has unsupported status: ${String(payload.status)}`);
+  }
+  if (!isObject(payload.roundMetadata)) {
+    throw new Error("Round snapshot must include roundMetadata object.");
+  }
+  const schemaVersion = payload.roundMetadata.schemaVersion;
+  if (typeof schemaVersion !== "number" || !Number.isInteger(schemaVersion) || schemaVersion < 1) {
+    throw new Error("Round snapshot roundMetadata.schemaVersion must be an integer >= 1.");
+  }
+
+  const requiredArrays: Array<keyof RoundSnapshotPayload> = [
+    "players",
+    "teams",
+    "holeScores",
+    "junkEvents",
+    "closestEventsPar3",
+    "closestEventsPar5",
+    "presses",
+    "finalLedger"
+  ];
+  for (const key of requiredArrays) {
+    if (!Array.isArray(payload[key])) {
+      throw new Error(`Round snapshot field ${key} must be an array.`);
+    }
+  }
 }
 
 function mapSnapshotStatus(value: unknown): RoundSnapshotPayload["status"] {
@@ -212,17 +348,17 @@ function toPlayers(items: Array<Record<string, unknown>>): SnapshotPlayer[] {
 }
 
 function toTeams(items: Array<Record<string, unknown>>): SnapshotTeam[] {
-  return items
-    .map((item) => {
+  const teams: SnapshotTeam[] = [];
+  for (const item of items) {
       const id = typeof item.id === "string" ? item.id : "";
       const name = typeof item.name === "string" ? item.name : "";
-      if (!id || !name) return null;
+      if (!id || !name) continue;
       const playerIds = Array.isArray(item.playerIds)
         ? item.playerIds.filter((value): value is string => typeof value === "string")
         : undefined;
-      return { id, name, playerIds };
-    })
-    .filter((item): item is SnapshotTeam => item !== null);
+      teams.push({ id, name, playerIds });
+  }
+  return teams;
 }
 
 function toHoleScores(items: Array<Record<string, unknown>>): SnapshotHoleScore[] {
@@ -248,22 +384,22 @@ function toHoleScores(items: Array<Record<string, unknown>>): SnapshotHoleScore[
 }
 
 function toJunkEvents(items: Array<Record<string, unknown>>): SnapshotJunkEvent[] {
-  return items
-    .map((item) => {
+  const events: SnapshotJunkEvent[] = [];
+  for (const item of items) {
       const holeNumber = typeof item.holeNumber === "number" ? item.holeNumber : NaN;
       const playerId = typeof item.playerId === "string" ? item.playerId : "";
       const teamId = typeof item.teamId === "string" ? item.teamId : "";
       const type = typeof item.type === "string" ? item.type : "";
-      if (!Number.isFinite(holeNumber) || !playerId || !teamId || !type) return null;
-      return {
+      if (!Number.isFinite(holeNumber) || !playerId || !teamId || !type) continue;
+      events.push({
         holeNumber,
         playerId,
         teamId,
         type,
         points: typeof item.points === "number" ? item.points : undefined
-      };
-    })
-    .filter((item): item is SnapshotJunkEvent => item !== null);
+      });
+  }
+  return events;
 }
 
 function toClosestEvents(items: Array<Record<string, unknown>>): SnapshotClosestEvent[] {
@@ -278,8 +414,8 @@ function toClosestEvents(items: Array<Record<string, unknown>>): SnapshotClosest
 }
 
 function toPresses(items: Array<Record<string, unknown>>): SnapshotPress[] {
-  return items
-    .map((item) => {
+  const presses: SnapshotPress[] = [];
+  for (const item of items) {
       const id = typeof item.id === "string" ? item.id : "";
       const side = item.side === "front" || item.side === "back" ? item.side : null;
       const startingHole = typeof item.startingHole === "number" ? item.startingHole : NaN;
@@ -300,9 +436,9 @@ function toPresses(items: Array<Record<string, unknown>>): SnapshotPress[] {
         !Number.isFinite(triggerHole) ||
         !status
       ) {
-        return null;
+        continue;
       }
-      return {
+      presses.push({
         id,
         side,
         startingHole,
@@ -313,49 +449,71 @@ function toPresses(items: Array<Record<string, unknown>>): SnapshotPress[] {
         triggerHole,
         sourceMatchId: typeof item.sourceMatchId === "string" ? item.sourceMatchId : undefined,
         status
-      };
-    })
-    .filter((item): item is SnapshotPress => item !== null);
+      });
+  }
+  return presses;
 }
 
 function toLedgerEntries(items: Array<Record<string, unknown>>): SnapshotLedgerEntry[] {
-  return items
-    .map((item) => {
+  const entries: SnapshotLedgerEntry[] = [];
+  for (const item of items) {
       const type = typeof item.type === "string" ? item.type : "";
       const teamId = typeof item.teamId === "string" ? item.teamId : "";
       const points = typeof item.points === "number" ? item.points : NaN;
       const description = typeof item.description === "string" ? item.description : "";
-      if (!type || !teamId || !Number.isFinite(points) || !description) return null;
-      return {
+      if (!type || !teamId || !Number.isFinite(points) || !description) continue;
+      entries.push({
         holeNumber: typeof item.holeNumber === "number" ? item.holeNumber : undefined,
         type,
         teamId,
         playerId: typeof item.playerId === "string" ? item.playerId : undefined,
         points,
         description
-      };
-    })
-    .filter((item): item is SnapshotLedgerEntry => item !== null);
+      });
+  }
+  return entries;
 }
 
 export async function saveRoundSnapshot(
   payload: RoundSnapshotPayload,
   env: Record<string, string | undefined>
 ): Promise<void> {
+  const normalized = normalizeRoundSnapshotPayload(payload);
+  validateRoundSnapshotPayload(normalized);
+  const currentUserId = resolveCurrentRoundUserId(env);
+
   const supabase = createSupabaseClient(env);
+  let existingMetadata: Record<string, unknown> | null = null;
+  const { data: existingData, error: existingError } = await supabase
+    .from("round_snapshots")
+    .select("round_metadata")
+    .eq("round_id", normalized.roundId)
+    .single();
+  if (existingError && !isMissingRowError(existingError)) {
+    throw new Error(`Supabase round snapshot read failed: ${existingError.message}`);
+  }
+  if (!existingError && existingData && isObject(existingData.round_metadata)) {
+    existingMetadata = normalizeRoundMetadata(existingData.round_metadata);
+    if (!canEditRound(existingMetadata, currentUserId)) {
+      throw new Error(`Round ${normalized.roundId} is not editable by ${currentUserId}.`);
+    }
+  }
+
+  const forcedOwnerId = existingMetadata ? getRoundOwnership(existingMetadata).ownerId ?? undefined : undefined;
+  const metadataWithOwnership = withRoundOwnership(normalized.roundMetadata, currentUserId, forcedOwnerId);
   const { error } = await supabase.from("round_snapshots").upsert(
     {
-      round_id: payload.roundId,
-      status: payload.status,
-      round_metadata: payload.roundMetadata,
-      players: payload.players,
-      teams: payload.teams,
-      hole_scores: payload.holeScores,
-      junk_events: payload.junkEvents,
-      closest_events_par3: payload.closestEventsPar3,
-      closest_events_par5: payload.closestEventsPar5,
-      presses: payload.presses,
-      final_ledger: payload.finalLedger,
+      round_id: normalized.roundId,
+      status: normalized.status,
+      round_metadata: metadataWithOwnership,
+      players: normalized.players,
+      teams: normalized.teams,
+      hole_scores: normalized.holeScores,
+      junk_events: normalized.junkEvents,
+      closest_events_par3: normalized.closestEventsPar3,
+      closest_events_par5: normalized.closestEventsPar5,
+      presses: normalized.presses,
+      final_ledger: normalized.finalLedger,
       updated_at: new Date().toISOString()
     },
     { onConflict: "round_id" }
@@ -369,6 +527,7 @@ export async function listSavedRoundSummaries(
   env: Record<string, string | undefined>,
   limit = 20
 ): Promise<SavedRoundSummary[]> {
+  const currentUserId = resolveCurrentRoundUserId(env);
   const supabase = createSupabaseClient(env);
   const { data, error } = await supabase
     .from("round_snapshots")
@@ -383,13 +542,14 @@ export async function listSavedRoundSummaries(
     .map((row) => {
       const roundId = typeof row.round_id === "string" ? row.round_id : "";
       const updatedAt = typeof row.updated_at === "string" ? row.updated_at : "";
-      const roundMetadata = isObject(row.round_metadata) ? row.round_metadata : {};
+      const roundMetadata = normalizeRoundMetadata(row.round_metadata);
+      if (!canViewRound(roundMetadata, currentUserId)) return null;
       const players = isRecordArray(row.players) ? row.players : [];
       const holeScores = isRecordArray(row.hole_scores) ? row.hole_scores : [];
       if (!roundId || !updatedAt) return null;
       const playerNames = players
-        .map((item) => (typeof item.name === "string" ? item.name : ""))
-        .filter((name) => name.length > 0);
+        .map((item: Record<string, unknown>) => (typeof item.name === "string" ? item.name : ""))
+        .filter((name: string) => name.length > 0);
       const courseName =
         typeof roundMetadata.courseName === "string" && roundMetadata.courseName
           ? roundMetadata.courseName
@@ -410,6 +570,7 @@ export async function loadRoundSnapshot(
   roundId: string,
   env: Record<string, string | undefined>
 ): Promise<RoundSnapshotPayload> {
+  const currentUserId = resolveCurrentRoundUserId(env);
   const supabase = createSupabaseClient(env);
   const { data, error } = await supabase
     .from("round_snapshots")
@@ -422,10 +583,10 @@ export async function loadRoundSnapshot(
     throw new Error(`Supabase load round snapshot failed: ${error?.message ?? "not found"}`);
   }
 
-  return {
+  const normalized = normalizeRoundSnapshotPayload({
     roundId: typeof data.round_id === "string" ? data.round_id : roundId,
     status: mapSnapshotStatus(data.status),
-    roundMetadata: isObject(data.round_metadata) ? data.round_metadata : {},
+    roundMetadata: normalizeRoundMetadata(data.round_metadata),
     players: isRecordArray(data.players) ? data.players : [],
     teams: isRecordArray(data.teams) ? data.teams : [],
     holeScores: isRecordArray(data.hole_scores) ? data.hole_scores : [],
@@ -434,7 +595,12 @@ export async function loadRoundSnapshot(
     closestEventsPar5: isRecordArray(data.closest_events_par5) ? data.closest_events_par5 : [],
     presses: isRecordArray(data.presses) ? data.presses : [],
     finalLedger: isRecordArray(data.final_ledger) ? data.final_ledger : []
-  };
+  });
+  if (!canViewRound(normalized.roundMetadata, currentUserId)) {
+    throw new Error(`Round ${roundId} is not viewable by ${currentUserId}.`);
+  }
+  validateRoundSnapshotPayload(normalized);
+  return normalized;
 }
 
 export async function searchPlayers(
@@ -468,6 +634,7 @@ export async function searchPlayers(
 export async function getSeasonJunkLeaderboard(
   env: Record<string, string | undefined>
 ): Promise<SeasonJunkLeaderRow[]> {
+  const currentUserId = resolveCurrentRoundUserId(env);
   const supabase = createSupabaseClient(env);
   const { data, error } = await supabase
     .from("round_snapshots")
@@ -481,7 +648,8 @@ export async function getSeasonJunkLeaderboard(
   const nameByPlayerId = new Map<string, string>();
 
   for (const row of data ?? []) {
-    const metadata = isObject(row.round_metadata) ? row.round_metadata : {};
+    const metadata = normalizeRoundMetadata(row.round_metadata);
+    if (!canViewRound(metadata, currentUserId)) continue;
     if (metadata.lifecycleStatus === "abandoned") continue;
     const players = isRecordArray(row.players) ? row.players : [];
     for (const player of players) {
@@ -517,8 +685,16 @@ export async function saveRoundNormalized(
   payload: RoundSnapshotPayload,
   env: Record<string, string | undefined>
 ): Promise<void> {
+  const normalized = normalizeRoundSnapshotPayload(payload);
+  validateRoundSnapshotPayload(normalized);
+  const currentUserId = resolveCurrentRoundUserId(env);
+  const metadataWithOwnership = withRoundOwnership(normalized.roundMetadata, currentUserId);
+  if (!canEditRound(metadataWithOwnership, currentUserId)) {
+    throw new Error(`Round ${normalized.roundId} is not editable by ${currentUserId}.`);
+  }
+
   const supabase = createSupabaseClient(env);
-  const roundMetadata = isObject(payload.roundMetadata) ? payload.roundMetadata : {};
+  const roundMetadata = metadataWithOwnership;
   const settings = isObject(roundMetadata.settings) ? roundMetadata.settings : {};
   const courseExternalRef =
     typeof roundMetadata.courseId === "string" && roundMetadata.courseId ? roundMetadata.courseId : null;
@@ -531,8 +707,8 @@ export async function saveRoundNormalized(
     .from("rounds")
     .upsert(
       {
-        external_round_ref: payload.roundId,
-        status: payload.status,
+        external_round_ref: normalized.roundId,
+        status: normalized.status,
         settings,
         course_external_ref: courseExternalRef,
         course_name: courseName,
@@ -548,7 +724,7 @@ export async function saveRoundNormalized(
   }
   const roundDbId = roundRow.id as string;
 
-  const players = toPlayers(payload.players);
+  const players = toPlayers(normalized.players);
   if (!players.length) {
     throw new Error("No players available to persist.");
   }
@@ -653,7 +829,7 @@ export async function saveRoundNormalized(
   const { error: deleteRoundTeamsError } = await supabase.from("round_teams").delete().eq("round_id", roundDbId);
   if (deleteRoundTeamsError) throw new Error(`Failed clearing prior round teams: ${deleteRoundTeamsError.message}`);
 
-  const teams = toTeams(payload.teams);
+  const teams = toTeams(normalized.teams);
   if (!teams.length) {
     throw new Error("No teams available to persist.");
   }
@@ -722,7 +898,7 @@ export async function saveRoundNormalized(
     }
   }
 
-  const holeScores = toHoleScores(payload.holeScores);
+  const holeScores = toHoleScores(normalized.holeScores);
   if (holeScores.length) {
     const { error: holeScoresError } = await supabase.from("hole_scores").insert(
       holeScores.map((score) => {
@@ -746,7 +922,7 @@ export async function saveRoundNormalized(
     }
   }
 
-  const junkEvents = toJunkEvents(payload.junkEvents);
+  const junkEvents = toJunkEvents(normalized.junkEvents);
   if (junkEvents.length) {
     const { error: junkEventsError } = await supabase.from("round_junk_events").insert(
       junkEvents.map((event) => {
@@ -775,8 +951,8 @@ export async function saveRoundNormalized(
     }
   }
 
-  const closestEventsPar3 = toClosestEvents(payload.closestEventsPar3);
-  const closestEventsPar5 = toClosestEvents(payload.closestEventsPar5);
+  const closestEventsPar3 = toClosestEvents(normalized.closestEventsPar3);
+  const closestEventsPar5 = toClosestEvents(normalized.closestEventsPar5);
   const closestRows = [
     ...closestEventsPar3.map((event) => ({ ...event, track: "par3" as const })),
     ...closestEventsPar5.map((event) => ({ ...event, track: "par5" as const }))
@@ -805,7 +981,7 @@ export async function saveRoundNormalized(
     }
   }
 
-  const presses = toPresses(payload.presses);
+  const presses = toPresses(normalized.presses);
   if (presses.length) {
     const { error: pressesError } = await supabase.from("round_presses").insert(
       presses.map((press) => {
@@ -837,7 +1013,7 @@ export async function saveRoundNormalized(
     }
   }
 
-  const ledgerEntries = toLedgerEntries(payload.finalLedger);
+  const ledgerEntries = toLedgerEntries(normalized.finalLedger);
   if (ledgerEntries.length) {
     const { error: ledgerError } = await supabase.from("ledger_entries").insert(
       ledgerEntries.map((entry) => ({

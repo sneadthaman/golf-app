@@ -33,10 +33,40 @@ The app is currently a development harness to validate scoring logic, persistenc
   - saved rounds list (status/date/course/players/holes completed)
   - load/resume saved rounds from snapshots
   - mark round abandoned
+  - snapshot contract versioning (`schemaVersion`)
+  - ownership ACL (`owner/editor/viewer`) enforced on save/load/list
 - Season tracking:
   - season junk leaderboard from saved snapshots
   - includes junk + CP points
   - crown icon for current #1 (Junk King)
+- Settlement UX:
+  - simplified team owes/wins summary
+  - player junk totals
+  - CP winners
+  - press results collapsed by default
+  - copy/share settlement summary
+  - text-message export format
+
+## Mobile (Expo) Scaffold
+
+- React Native Expo app scaffold is in `mobile-expo/`
+- Implemented mobile harness flows:
+  - Create round
+  - Resume round
+  - Score round
+  - Settlement view
+  - Season leaderboard
+- Mobile currently persists snapshots locally via AsyncStorage, with contract-compatible shape and ACL checks.
+
+Run:
+
+- `cd mobile-expo`
+- `npm install`
+- `npm run start`
+
+Optional identity override for ownership testing:
+
+- `EXPO_PUBLIC_ROUND_USER_ID=sam-device npm run start`
 
 ## Stack
 
@@ -85,6 +115,7 @@ The app is currently a development harness to validate scoring logic, persistenc
 ### Snapshot table
 
 - `round_snapshots`
+  - metadata includes `schemaVersion` and `ownership`
 
 ### Normalized tables
 
@@ -118,6 +149,6 @@ The app is currently a development harness to validate scoring logic, persistenc
 
 ## Next Priorities
 
-- Mobile app contract freeze (shared JSON state model + API surface)
-- Auth/player ownership model for non-dev usage
-- Final settlement UX pass (presentation + export/sharing)
+- Wire mobile storage adapter from AsyncStorage to Supabase snapshots
+- Add mobile auth/session identity integration
+- Expand mobile scoring parity with full engine rules
